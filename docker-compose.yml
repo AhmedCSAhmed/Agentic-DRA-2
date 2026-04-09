@@ -1,0 +1,20 @@
+# PostgreSQL for agent machine metadata (global state).
+# Start: docker compose up -d
+# Stop:  docker compose down
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: agentic-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: machines_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - agentic-postgres-data:/var/lib/postgresql/data
+
+volumes:
+  agentic-postgres-data:

@@ -1,0 +1,28 @@
+syntax = "proto3";
+
+package dra;
+
+service DRAService {
+  rpc PullAndRunImage(PullAndRunRequest) returns (PullAndRunResponse);
+}
+
+enum WorkloadState {
+  WORKLOAD_STATE_UNSPECIFIED = 0;
+  STOPPED = 1;
+  RUNNING = 2;
+  DONE = 3;
+  ERROR = 4;
+}
+
+message PullAndRunRequest {
+  string image_name = 1;
+}
+
+message PullAndRunResponse {
+  bool success = 1;
+  string container_id = 2;
+  WorkloadState workload_state = 3;
+  float cpu_used = 4;
+  float memory_gb_used = 5;
+  string message = 6;
+}
