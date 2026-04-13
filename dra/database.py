@@ -1,17 +1,20 @@
-from sqlalchemy import create_engine
-from sqlalchemy.orm import Session, sessionmaker
-from dotenv import load_dotenv
-
 import os
+
+from sqlalchemy import Engine, create_engine
+from sqlalchemy.orm import Session, sessionmaker
 
 
 class Database:
     def __init__(self) -> None:
-        load_dotenv()
-        database_url = os.getenv("DATABASE_URL")
-        if not database_url:
-            raise ValueError("DATABASE_URL must be set for the database connection")
-        self.engine = create_engine(database_url, pool_pre_ping=True)
+        url = os.environ.get(
+            "DATABASE_URL",
+            "postgresql+psycopg://postgres:postgres@localhost:5432/machines_db",
+        ).strip()
+        # Supabase (and some providers) expose postgres:// URLs; SQLAlchemy expects postgresql://
+        if url.startswith("postgres://"):
+            url = "postgresql://" + url[len("postgres://") :]
+
+        self.engine: Engine = create_engine(url, pool_pre_ping=True)
         self._session_factory = sessionmaker(bind=self.engine)
 
     def start_session(self) -> Session:

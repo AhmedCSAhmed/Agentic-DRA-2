@@ -24,19 +24,19 @@ _sym_db = _symbol_database.Default()
 
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\tdra.proto\x12\x03\x64ra\"\'\n\x11PullAndRunRequest\x12\x12\n\nimage_name\x18\x01 \x01(\t\"\xa2\x01\n\x12PullAndRunResponse\x12\x0f\n\x07success\x18\x01 \x01(\x08\x12\x14\n\x0c\x63ontainer_id\x18\x02 \x01(\t\x12*\n\x0eworkload_state\x18\x03 \x01(\x0e\x32\x12.dra.WorkloadState\x12\x10\n\x08\x63pu_used\x18\x04 \x01(\x02\x12\x16\n\x0ememory_gb_used\x18\x05 \x01(\x02\x12\x0f\n\x07message\x18\x06 \x01(\t*^\n\rWorkloadState\x12\x1e\n\x1aWORKLOAD_STATE_UNSPECIFIED\x10\x00\x12\x0b\n\x07STOPPED\x10\x01\x12\x0b\n\x07RUNNING\x10\x02\x12\x08\n\x04\x44ONE\x10\x03\x12\t\n\x05\x45RROR\x10\x04\x32P\n\nDRAService\x12\x42\n\x0fPullAndRunImage\x12\x16.dra.PullAndRunRequest\x1a\x17.dra.PullAndRunResponseb\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\tdra.proto\x12\x03\x64ra\"8\n\x11PullAndRunRequest\x12\x12\n\nimage_name\x18\x01 \x01(\t\x12\x0f\n\x07\x63ommand\x18\x02 \x03(\t\"\xa2\x01\n\x12PullAndRunResponse\x12\x0f\n\x07success\x18\x01 \x01(\x08\x12\x14\n\x0c\x63ontainer_id\x18\x02 \x01(\t\x12*\n\x0eworkload_state\x18\x03 \x01(\x0e\x32\x12.dra.WorkloadState\x12\x10\n\x08\x63pu_used\x18\x04 \x01(\x02\x12\x16\n\x0ememory_gb_used\x18\x05 \x01(\x02\x12\x0f\n\x07message\x18\x06 \x01(\t*^\n\rWorkloadState\x12\x1e\n\x1aWORKLOAD_STATE_UNSPECIFIED\x10\x00\x12\x0b\n\x07STOPPED\x10\x01\x12\x0b\n\x07RUNNING\x10\x02\x12\x08\n\x04\x44ONE\x10\x03\x12\t\n\x05\x45RROR\x10\x04\x32P\n\nDRAService\x12\x42\n\x0fPullAndRunImage\x12\x16.dra.PullAndRunRequest\x1a\x17.dra.PullAndRunResponseb\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
 _builder.BuildTopDescriptorsAndMessages(DESCRIPTOR, 'dra_pb2', _globals)
 if not _descriptor._USE_C_DESCRIPTORS:
   DESCRIPTOR._loaded_options = None
-  _globals['_WORKLOADSTATE']._serialized_start=224
-  _globals['_WORKLOADSTATE']._serialized_end=318
+  _globals['_WORKLOADSTATE']._serialized_start=241
+  _globals['_WORKLOADSTATE']._serialized_end=335
   _globals['_PULLANDRUNREQUEST']._serialized_start=18
-  _globals['_PULLANDRUNREQUEST']._serialized_end=57
-  _globals['_PULLANDRUNRESPONSE']._serialized_start=60
-  _globals['_PULLANDRUNRESPONSE']._serialized_end=222
-  _globals['_DRASERVICE']._serialized_start=320
-  _globals['_DRASERVICE']._serialized_end=400
+  _globals['_PULLANDRUNREQUEST']._serialized_end=74
+  _globals['_PULLANDRUNRESPONSE']._serialized_start=77
+  _globals['_PULLANDRUNRESPONSE']._serialized_end=239
+  _globals['_DRASERVICE']._serialized_start=337
+  _globals['_DRASERVICE']._serialized_end=417
 # @@protoc_insertion_point(module_scope)

@@ -51,10 +51,13 @@ class MachineRepository:
         machine_id: str,
         machine_name: str,
         machine_type: str,
+        dra_grpc_target: str | None = None,
     ) -> MachineModelORM:
         self._validate_machine_id(machine_id)
         self._validate_machine_name(machine_name)
         self._validate_machine_type(machine_type)
+        if dra_grpc_target is not None:
+            self._validate_dra_grpc_target(dra_grpc_target)
 
         now = self._now()
         machine = MachineModelORM(
@@ -63,6 +66,7 @@ class MachineRepository:
             machine_type=machine_type,
             machine_created_at=now,
             machine_updated_at=now,
+            dra_grpc_target=dra_grpc_target.strip() if dra_grpc_target else None,
         )
 
         session = self._db.start_session()
@@ -120,9 +124,10 @@ class MachineRepository:
         *,
         machine_name: str | None = None,
         machine_type: str | None = None,
+        dra_grpc_target: str | None = None,
     ) -> MachineModelORM:
         self._validate_machine_id(machine_id)
-        if machine_name is None and machine_type is None:
+        if machine_name is None and machine_type is None and dra_grpc_target is None:
             raise InvalidMachineDataError(
                 "At least one field must be provided to update machine metadata"
             )
@@ -130,6 +135,8 @@ class MachineRepository:
             self._validate_machine_name(machine_name)
         if machine_type is not None:
             self._validate_machine_type(machine_type)
+        if dra_grpc_target is not None:
+            self._validate_dra_grpc_target(dra_grpc_target)
 
         session = self._db.start_session()
         session.expire_on_commit = False
@@ -148,6 +155,8 @@ class MachineRepository:
                 setattr(machine, "machine_name", machine_name)
             if machine_type is not None:
                 setattr(machine, "machine_type", machine_type)
+            if dra_grpc_target is not None:
+                setattr(machine, "dra_grpc_target", dra_grpc_target.strip())
             setattr(machine, "machine_updated_at", self._now())
 
             session.commit()
@@ -268,6 +277,24 @@ class MachineRepository:
     def _validate_machine_type(machine_type: str) -> None:
         if not machine_type or not machine_type.strip():
             raise InvalidMachineDataError("machine_type is required")
+
+    @staticmethod
+    def _validate_dra_grpc_target(value: str) -> None:
+        if not value or not value.strip():
+            raise InvalidMachineDataError("dra_grpc_target cannot be empty")
+        text = value.strip()
+        if text.count(":") != 1:
+            raise InvalidMachineDataError(
+                "dra_grpc_target must be host:port (e.g. 10.0.0.5:50051)"
+            )
+        host, port_str = text.split(":", 1)
+        if not host or not port_str.isdigit():
+            raise InvalidMachineDataError(
+                "dra_grpc_target must be host:port (e.g. 10.0.0.5:50051)"
+            )
+        port = int(port_str)
+        if not 1 <= port <= 65535:
+            raise InvalidMachineDataError("dra_grpc_target port must be between 1 and 65535")
 
     @staticmethod
     def _normalize_availability_map(

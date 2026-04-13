@@ -25,5 +25,6 @@ class MachineModelORM(Base):
     machine_type = Column(String, nullable=False)
     machine_created_at = Column(DateTime, nullable=False)
     machine_updated_at = Column(DateTime, nullable=False)
-    
+    dra_grpc_target = Column(String, nullable=True)
+
     
