@@ -8,7 +8,7 @@ without changing the default channel.
 from __future__ import annotations
 
 import os
-from typing import Any
+from typing import Any, Sequence
 
 import grpc
 
@@ -39,16 +39,26 @@ class DRAGrpcClient:
         self,
         image_name: str,
         *,
+        command: Sequence[str] | None = None,
+        restart_policy: str | None = None,
         grpc_target: str | None = None,
         timeout: float | None = DEFAULT_RPC_TIMEOUT_S,
     ) -> dict[str, Any]:
         """Calls `PullAndRunImage` and returns a JSON-serializable dict.
+
+        ``command`` is optional args after the image (when the default CMD exits immediately).
+        ``restart_policy`` sets Docker ``--restart`` (e.g. ``unless-stopped`` for service-like runs).
 
         If ``grpc_target`` is set (``host:port``), uses a short-lived channel to that address.
         Otherwise uses the client's default stub (constructor / ``DRA_GRPC_TARGET``).
         """
 
         request = dra_pb2.PullAndRunRequest(image_name=image_name.strip())
+        if command:
+            request.command.extend([str(x) for x in command if str(x).strip()])
+        rp = (restart_policy or "").strip()
+        if rp:
+            request.restart_policy = rp
         override = (grpc_target or "").strip()
         if override:
             channel = grpc.insecure_channel(override)

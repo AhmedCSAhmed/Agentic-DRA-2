@@ -12,6 +12,7 @@ RPC mapping (see ``dra.proto`` / ``dra_pb2_grpc.py``):
 from __future__ import annotations
 
 import json
+import shlex
 from typing import Any
 
 from agents import Tool, function_tool
@@ -81,13 +82,17 @@ def build_dra_tools(client: DRAGrpcClient, machine_repo: MachineRepository) -> l
         description_override=(
             "gRPC RPC: ``dra.DRAService/PullAndRunImage`` — same as ``dra/grpc_server.py``. "
             "Resolves host:port via machine_id (Postgres dra_grpc_target), grpc_target, or default. "
-            "Then invokes the RPC with image_name (Docker pull/run on the remote DRA server)."
+            "Then invokes Docker pull/run on the remote DRA host. "
+            "Use ``restart_policy`` ``unless-stopped`` for long-running services (survives crashes/reboots until docker stop). "
+            "Use ``command`` (e.g. ``sleep infinity``) only if the image CMD exits immediately."
         ),
     )
     def pull_and_run_image(
         image_name: str,
         machine_id: str | None = None,
         grpc_target: str | None = None,
+        command: str | None = None,
+        restart_policy: str | None = None,
     ) -> str:
         """Implements RPC PullAndRunImage (request field image_name).
 
@@ -95,6 +100,8 @@ def build_dra_tools(client: DRAGrpcClient, machine_repo: MachineRepository) -> l
             image_name: Passed to the RPC as ``PullAndRunRequest.image_name``.
             machine_id: If set, load ``dra_grpc_target`` from Postgres for the gRPC channel.
             grpc_target: Optional ``host:port`` when not using machine_id.
+            command: Optional ``docker run`` args after the image (shell-style), e.g. ``sleep infinity``.
+            restart_policy: Docker restart policy: ``no``, ``on-failure``, ``always``, ``unless-stopped``.
         """
         resolved: str | None = None
         source: str | None = None
@@ -128,10 +135,16 @@ def build_dra_tools(client: DRAGrpcClient, machine_repo: MachineRepository) -> l
                 resolved = gt
                 source = "grpc_target"
 
-        payload = client.pull_and_run_image(
-            image_name,
-            grpc_target=resolved,
-        )
+        cmd = shlex.split((command or "").strip()) if (command or "").strip() else None
+        rp = (restart_policy or "").strip() or None
+
+        kwargs: dict[str, Any] = {"grpc_target": resolved}
+        if cmd:
+            kwargs["command"] = cmd
+        if rp:
+            kwargs["restart_policy"] = rp
+
+        payload = client.pull_and_run_image(image_name, **kwargs)
         if source:
             payload = {**payload, "connection_source": source}
         if mid:

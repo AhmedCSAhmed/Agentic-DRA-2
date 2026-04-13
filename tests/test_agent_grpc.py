@@ -44,6 +44,36 @@ class DRAGrpcClientTests(unittest.TestCase):
         self.assertEqual(out["memory_gb_used"], 8.0)
         self.assertEqual(out["grpc_target"], "test:123")
 
+    def test_pull_and_run_image_passes_command_and_restart_policy(self) -> None:
+        resp = dra_pb2.PullAndRunResponse(
+            success=True,
+            container_id="abc",
+            workload_state=dra_pb2.RUNNING,
+            cpu_used=1.0,
+            memory_gb_used=2.0,
+            message="ok",
+        )
+        stub = MagicMock()
+        stub.PullAndRunImage.return_value = resp
+
+        client = object.__new__(DRAGrpcClient)
+        client._target = "test:123"
+        client._channel = MagicMock()
+        client._stub = stub
+
+        DRAGrpcClient.pull_and_run_image(
+            client,
+            "nginx:latest",
+            command=["sleep", "infinity"],
+            restart_policy="unless-stopped",
+            timeout=1.0,
+        )
+
+        (req,), _ = stub.PullAndRunImage.call_args
+        self.assertEqual(req.image_name, "nginx:latest")
+        self.assertEqual(list(req.command), ["sleep", "infinity"])
+        self.assertEqual(req.restart_policy, "unless-stopped")
+
     def test_pull_and_run_image_uses_ephemeral_channel_when_grpc_target_set(self) -> None:
         resp = dra_pb2.PullAndRunResponse(
             success=True,
@@ -221,6 +251,33 @@ class BuildDraToolsTests(unittest.TestCase):
         self.repo.find_machine_by_id.assert_not_called()
         self.grpc_client.pull_and_run_image.assert_called_once_with(
             "alpine:3.19", grpc_target="10.0.0.2:50051"
+        )
+
+    @patch("agent.tools.json.dumps")
+    def test_pull_and_run_image_tool_passes_deployment_options(self, mock_dumps: MagicMock) -> None:
+        mock_dumps.side_effect = lambda x: f"JSON:{x}"
+
+        tools = build_dra_tools(self.grpc_client, self.repo)
+        rpc_tool = next(t for t in tools if t.name == "pull_and_run_image")
+        loop_body = rpc_tool.on_invoke_tool
+
+        async def _run() -> object:
+            ctx = MagicMock()
+            ctx.tool_name = rpc_tool.name
+            payload = (
+                '{"image_name":"myapp:latest","grpc_target":"127.0.0.1:50051",'
+                '"restart_policy":"unless-stopped","command":"sleep infinity"}'
+            )
+            return await loop_body(ctx, payload)
+
+        import asyncio
+
+        asyncio.run(_run())
+        self.grpc_client.pull_and_run_image.assert_called_once_with(
+            "myapp:latest",
+            command=["sleep", "infinity"],
+            restart_policy="unless-stopped",
+            grpc_target="127.0.0.1:50051",
         )
 
 

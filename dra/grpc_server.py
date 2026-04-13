@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import logging
+import os
 import re
+import shlex
 import subprocess
 from typing import Sequence
 
@@ -31,6 +33,9 @@ class DRAServiceServicer(dra_pb2_grpc.DRAServiceServicer):
     COMMAND_TIMEOUT_SECONDS = 120
     IMAGE_CHECK_TIMEOUT_SECONDS = 30
     IMAGE_NAME_PATTERN = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._/\-:@]{0,254}$")
+    RESTART_POLICY_PATTERN = re.compile(
+        r"^(no|on-failure|always|unless-stopped|on-failure:\d+)$"
+    )
 
     def PullAndRunImage(self, request, context):
         """Pulls an image if needed, runs a container, and returns runtime metrics.
@@ -54,9 +59,23 @@ class DRAServiceServicer(dra_pb2_grpc.DRAServiceServicer):
 
         logger.info("PullAndRunImage request received for image=%s", image_name)
 
+        restart_policy = self._resolve_restart_policy(request)
+        if restart_policy is not None and not self._is_valid_restart_policy(restart_policy):
+            logger.warning("Invalid restart_policy received: %r", restart_policy)
+            context.set_code(grpc.StatusCode.INVALID_ARGUMENT)
+            context.set_details("Invalid restart_policy")
+            return self._error_response(
+                "Invalid restart_policy (use no, on-failure, always, unless-stopped, or on-failure:N)"
+            )
+
         try:
             pulled = self.pull_image(image_name)
-            container_id = self.run_container(image_name)
+            cmd_args = self._resolve_run_command(request)
+            container_id = self.run_container(
+                image_name,
+                command=cmd_args,
+                restart_policy=restart_policy,
+            )
             cpu_used, memory_gb_used = self.get_metrics()
 
             message = (
@@ -126,13 +145,53 @@ class DRAServiceServicer(dra_pb2_grpc.DRAServiceServicer):
                 f"Docker pull failed for image '{image_name}': {self._stderr_or_stdout(exc)}"
             ) from exc
 
-    def run_container(self, image_name: str) -> str:
+    def _resolve_run_command(self, request: dra_pb2.PullAndRunRequest) -> list[str]:
+        """Extra args after the image: request.command, else DRA_RUN_COMMAND env."""
+
+        if request.command:
+            return [str(x).strip() for x in request.command if str(x).strip()]
+        env_cmd = (os.environ.get("DRA_RUN_COMMAND") or "").strip()
+        if env_cmd:
+            return shlex.split(env_cmd)
+        return []
+
+    def _resolve_restart_policy(self, request: dra_pb2.PullAndRunRequest) -> str | None:
+        """Docker --restart value: request field, else DRA_DOCKER_RESTART_POLICY env."""
+
+        raw = (request.restart_policy or "").strip()
+        if raw:
+            return raw
+        env_pol = (os.environ.get("DRA_DOCKER_RESTART_POLICY") or "").strip()
+        return env_pol or None
+
+    @classmethod
+    def _is_valid_restart_policy(cls, policy: str) -> bool:
+        return bool(cls.RESTART_POLICY_PATTERN.fullmatch(policy.strip()))
+
+    def run_container(
+        self,
+        image_name: str,
+        *,
+        command: Sequence[str] | None = None,
+        restart_policy: str | None = None,
+    ) -> str:
         """Runs a container in detached mode and returns its container ID."""
 
-        logger.info("Starting container for image=%s", image_name)
+        extra = list(command) if command else []
+        restart: list[str] = []
+        if restart_policy:
+            restart = ["--restart", restart_policy]
+
+        logger.info(
+            "Starting container for image=%s restart=%s command=%s",
+            image_name,
+            restart_policy or "(none)",
+            extra or "(image default)",
+        )
         try:
+            run_cmd = ["docker", "run", "-d", *restart, image_name, *extra]
             result = self._run_command(
-                ["docker", "run", "-d", image_name],
+                run_cmd,
                 timeout=self.COMMAND_TIMEOUT_SECONDS,
             )
         except subprocess.TimeoutExpired as exc:

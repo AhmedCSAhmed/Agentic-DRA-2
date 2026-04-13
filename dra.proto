@@ -16,6 +16,11 @@ enum WorkloadState {
 
 message PullAndRunRequest {
   string image_name = 1;
+  // Optional args after the image (container CMD). Use when the image default exits, e.g. "sleep", "infinity".
+  repeated string command = 2;
+  // Docker --restart value: no | on-failure | always | unless-stopped (or on-failure:N). Empty uses DRA_DOCKER_RESTART_POLICY env if set.
+  // "unless-stopped" is typical for long-running services: survives crashes/reboots until docker stop/rm.
+  string restart_policy = 3;
 }
 
 message PullAndRunResponse {
