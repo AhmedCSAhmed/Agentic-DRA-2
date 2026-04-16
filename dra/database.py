@@ -13,6 +13,10 @@ class Database:
         # Supabase (and some providers) expose postgres:// URLs; SQLAlchemy expects postgresql://
         if url.startswith("postgres://"):
             url = "postgresql://" + url[len("postgres://") :]
+        # If the URL doesn't specify a driver, SQLAlchemy defaults to psycopg2.
+        # This project depends on psycopg (v3), so prefer that driver implicitly.
+        if url.startswith("postgresql://"):
+            url = "postgresql+psycopg://" + url[len("postgresql://") :]
 
         self.engine: Engine = create_engine(url, pool_pre_ping=True)
         self._session_factory = sessionmaker(bind=self.engine)
