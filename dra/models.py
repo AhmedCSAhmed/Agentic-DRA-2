@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import Column, DateTime, Integer, String
+from sqlalchemy import Column, DateTime, Float, Integer, String
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.declarative import declarative_base
 
@@ -26,5 +26,6 @@ class MachineModelORM(Base):
     machine_created_at = Column(DateTime, nullable=False)
     machine_updated_at = Column(DateTime, nullable=False)
     dra_grpc_target = Column(String, nullable=True)
+    available_gb = Column(Float, nullable=True)
 
     
