@@ -1,11 +1,14 @@
 import os
+from pathlib import Path
 
 from sqlalchemy import Engine, create_engine
 from sqlalchemy.orm import Session, sessionmaker
+from dotenv import load_dotenv
 
 
 class Database:
     def __init__(self) -> None:
+        load_dotenv(Path(__file__).resolve().parent.parent / ".env", override=False)
         url = os.environ.get(
             "DATABASE_URL",
             "postgresql+psycopg://postgres:postgres@localhost:5432/machines_db",

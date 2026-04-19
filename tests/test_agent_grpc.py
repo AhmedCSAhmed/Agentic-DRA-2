@@ -9,7 +9,7 @@ from unittest.mock import MagicMock, patch
 import dra_pb2
 
 from agent.client import DRAGrpcClient
-from agent.tools import build_dra_tools
+from agent.tools import build_dra_tools, invoke_pull_and_run_image_via_tool
 from dra.models import MachineModelORM
 
 
@@ -279,6 +279,52 @@ class BuildDraToolsTests(unittest.TestCase):
             restart_policy="unless-stopped",
             grpc_target="127.0.0.1:50051",
         )
+
+
+class InvokePullAndRunViaToolTests(unittest.TestCase):
+    def test_invoke_pull_and_run_image_via_tool_uses_tool_payload(self) -> None:
+        grpc_client = MagicMock()
+        grpc_client.pull_and_run_image.return_value = {
+            "success": True,
+            "grpc_target": "10.0.0.2:50051",
+        }
+        repo = MagicMock()
+
+        async def _run() -> dict[str, object]:
+            return await invoke_pull_and_run_image_via_tool(
+                client=grpc_client,
+                machine_repo=repo,
+                image_name="myapp:latest",
+                grpc_target="10.0.0.2:50051",
+                command="sleep infinity",
+                restart_policy="unless-stopped",
+            )
+
+        import asyncio
+
+        result = asyncio.run(_run())
+        self.assertEqual(result["success"], True)
+        grpc_client.pull_and_run_image.assert_called_once_with(
+            "myapp:latest",
+            command=["sleep", "infinity"],
+            restart_policy="unless-stopped",
+            grpc_target="10.0.0.2:50051",
+        )
+
+    @patch("agent.tools.build_dra_tools", return_value=[])
+    def test_invoke_pull_and_run_image_via_tool_handles_missing_tool(self, _: MagicMock) -> None:
+        async def _run() -> dict[str, object]:
+            return await invoke_pull_and_run_image_via_tool(
+                client=MagicMock(),
+                machine_repo=MagicMock(),
+                image_name="nginx:latest",
+            )
+
+        import asyncio
+
+        result = asyncio.run(_run())
+        self.assertTrue(result["error"])
+        self.assertIn("not registered", str(result["message"]))
 
 
 class InspectRunTests(unittest.TestCase):

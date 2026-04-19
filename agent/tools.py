@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import shlex
+from types import SimpleNamespace
 from typing import Any
 
 from agents import Tool, function_tool
@@ -152,3 +153,55 @@ def build_dra_tools(client: DRAGrpcClient, machine_repo: MachineRepository) -> l
         return json.dumps(payload)
 
     return [start_dra_grpc_server_tool, list_dra_machines, pull_and_run_image]
+
+
+async def invoke_pull_and_run_image_via_tool(
+    *,
+    client: DRAGrpcClient,
+    machine_repo: MachineRepository,
+    image_name: str,
+    machine_id: str | None = None,
+    grpc_target: str | None = None,
+    command: str | None = None,
+    restart_policy: str | None = None,
+) -> dict[str, Any]:
+    tools = build_dra_tools(client, machine_repo)
+    rpc_tool = next((tool for tool in tools if tool.name == "pull_and_run_image"), None)
+    if rpc_tool is None:
+        return {"error": True, "message": "pull_and_run_image tool is not registered"}
+
+    payload: dict[str, Any] = {"image_name": image_name}
+    if machine_id:
+        payload["machine_id"] = machine_id
+    if grpc_target:
+        payload["grpc_target"] = grpc_target
+    if command:
+        payload["command"] = command
+    if restart_policy:
+        payload["restart_policy"] = restart_policy
+
+    ctx = SimpleNamespace(tool_name=rpc_tool.name)
+    raw_result = await rpc_tool.on_invoke_tool(ctx, json.dumps(payload))
+    if isinstance(raw_result, dict):
+        return raw_result
+    if not isinstance(raw_result, str):
+        return {
+            "error": True,
+            "message": "pull_and_run_image tool returned non-string output",
+        }
+
+    try:
+        parsed = json.loads(raw_result)
+    except json.JSONDecodeError:
+        return {
+            "error": True,
+            "message": "pull_and_run_image tool returned invalid JSON",
+            "raw_output": raw_result,
+        }
+    if not isinstance(parsed, dict):
+        return {
+            "error": True,
+            "message": "pull_and_run_image tool returned non-object JSON",
+            "raw_output": raw_result,
+        }
+    return parsed
