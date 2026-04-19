@@ -32,7 +32,7 @@ def _check_passcode() -> bool:
         console.print("\n  [red]ATLAS_ADMIN_PASSCODE is not set in your .env file.[/red]\n")
         return False
 
-    entered = typer.prompt("\n  Admin passcode", hide_input=True)
+    entered = typer.prompt("\n  Admin passcode", hide_input=False)
     return entered.strip() == expected
 
 
