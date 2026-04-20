@@ -66,6 +66,7 @@ def boot_screen() -> None:
     console.print()
 
 
+
 def admin_boot_screen() -> None:
     try:
         count, machines = _get_cluster_status()

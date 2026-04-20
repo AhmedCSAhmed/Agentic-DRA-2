@@ -9,7 +9,10 @@ requires-python = ">=3.11"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["cli*"]
+include = ["cli*", "agent*", "dra*", "routes*"]
+
+[tool.setuptools]
+py-modules = ["dra_pb2", "dra_pb2_grpc"]
 
 [project.scripts]
 atlas = "cli.__main__:app"

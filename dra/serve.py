@@ -38,7 +38,7 @@ logger = logging.getLogger(__name__)
 
 
 def _default_bind() -> str:
-    return os.environ.get("DRA_GRPC_BIND", "100.104.168.47:50051")
+    return os.environ.get("DRA_GRPC_BIND", "0.0.0.0:50051")
 
 
 def _max_workers() -> int:
