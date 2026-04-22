@@ -207,19 +207,40 @@ def parse_deploy_repl_arg(arg: str) -> tuple[str, float, str | None, str | None,
     restart_policy: str | None = None
     i = 1
     while i < len(parts):
-        if parts[i] == "--memory-gb" and i + 1 < len(parts):
-            memory_gb = float(parts[i + 1])
-            i += 2
+        token = parts[i]
+
+        # Accept common aliases and `--flag=value` style.
+        if token.startswith("--memory-gb=") or token.startswith("--memory="):
+            _, value = token.split("=", 1)
+            memory_gb = float(value)
+            i += 1
             continue
-        if parts[i] == "--machine-type" and i + 1 < len(parts):
+
+        if token in ("--memory-gb", "--memory"):
+            # If the user typed `--memory-gb` without a value, prompt interactively
+            # (this parser is used only by the REPL).
+            next_is_value = i + 1 < len(parts) and not parts[i + 1].startswith("--")
+            if next_is_value:
+                memory_gb = float(parts[i + 1])
+                i += 2
+                continue
+
+            from cli.display import console
+
+            entered = console.input("  Minimum free memory (GB) [default 2]: ").strip()
+            memory_gb = float(entered) if entered else 2.0
+            i += 1
+            continue
+
+        if token == "--machine-type" and i + 1 < len(parts):
             machine_type = parts[i + 1]
             i += 2
             continue
-        if parts[i] == "--command" and i + 1 < len(parts):
+        if token == "--command" and i + 1 < len(parts):
             command = parts[i + 1]
             i += 2
             continue
-        if parts[i] == "--restart-policy" and i + 1 < len(parts):
+        if token == "--restart-policy" and i + 1 < len(parts):
             restart_policy = parts[i + 1]
             i += 2
             continue

@@ -5,8 +5,28 @@ import sys
 from pathlib import Path
 from typing import Optional
 
-# Ensure the project root is on the path regardless of where atlas is invoked from
-_PROJECT_ROOT = Path(__file__).parent.parent
+def _discover_project_root() -> Path:
+    """Best-effort repo root discovery for both editable and installed CLI.
+
+    When `atlas` is installed into a venv, `__file__` points into site-packages.
+    In that case we want to treat the *current working directory* (or its parents)
+    as the project root when the user runs `atlas` from the repo.
+    """
+
+    def looks_like_repo_root(p: Path) -> bool:
+        return (p / "pyproject.toml").exists() and (p / "cli").is_dir()
+
+    cwd = Path.cwd().resolve()
+    for p in (cwd, *cwd.parents):
+        if looks_like_repo_root(p):
+            return p
+
+    # Fallback: adjacent to this file (works for editable/dev runs).
+    return Path(__file__).resolve().parent.parent
+
+
+# Ensure the project root is on the path regardless of where atlas is invoked from.
+_PROJECT_ROOT = _discover_project_root()
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
@@ -26,7 +46,7 @@ app = typer.Typer(
 
 def _check_passcode() -> bool:
     from dotenv import load_dotenv
-    load_dotenv(_PROJECT_ROOT / ".env")
+    load_dotenv(_PROJECT_ROOT / ".env", override=False)
 
     expected = os.environ.get("ATLAS_ADMIN_PASSCODE", "").strip()
     if not expected:

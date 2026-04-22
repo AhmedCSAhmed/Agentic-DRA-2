@@ -42,9 +42,10 @@ def boot_screen() -> None:
     console.print("  Provide the full image name from your registry:\n", style="grey69")
 
     examples = [
-        ("Docker Hub  ", "atlas deploy mycompany/myapp:v1.0"),
-        ("GitHub GHCR ", "atlas deploy ghcr.io/org/app:latest"),
-        ("AWS ECR     ", "atlas deploy 123456.dkr.ecr.us-east-1.amazonaws.com/app:prod"),
+        ("Docker Hub  ", "deploy mycompany/myapp:v1.0"),
+        ("GitHub GHCR ", "deploy ghcr.io/org/app:latest"),
+        ("AWS ECR     ", "deploy 123456.dkr.ecr.us-east-1.amazonaws.com/app:prod"),
+        ("Memory req  ", "deploy nginx:latest --memory-gb 4"),
     ]
     for label, cmd in examples:
         console.print(f"    [medium_purple1]{label}[/medium_purple1]  [white]{cmd}[/white]")
@@ -53,7 +54,7 @@ def boot_screen() -> None:
     console.print("  [grey69]Commands:[/grey69]")
     console.print(
         "    [bold white]deploy [italic]<image>[/italic][/bold white]"
-        "      [grey69]Deploy a container to the best available machine[/grey69]"
+        "      [grey69]Deploy via scheduler (use --memory-gb to require free RAM)[/grey69]"
     )
     console.print(
         "    [bold white]help[/bold white]"

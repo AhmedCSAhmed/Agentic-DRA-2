@@ -109,7 +109,8 @@ def _show_help(admin: bool = False) -> None:
     console.print()
     console.print("  [grey69]Available commands:[/grey69]")
     console.print(
-        "    [bold white]deploy [italic]<image>[/italic][/bold white]   Deploy via DB scheduler (remote gRPC), not the LLM agent"
+        "    [bold white]deploy [italic]<image>[/italic][/bold white]   "
+        "[grey69][--memory-gb N] [--machine-type T] [--command \"...\"] [--restart-policy unless-stopped][/grey69]"
     )
     if admin:
         console.print("    [bold white]status[/bold white]           Show all registered machines")
