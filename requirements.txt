@@ -6,3 +6,4 @@ python-dotenv>=1.0.0
 grpcio>=1.78.0
 grpcio-tools>=1.78.0
 psutil>=6.0.0
+typer>=0.20.0

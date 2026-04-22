@@ -94,6 +94,7 @@ def build_dra_tools(client: DRAGrpcClient, machine_repo: MachineRepository) -> l
         grpc_target: str | None = None,
         command: str | None = None,
         restart_policy: str | None = None,
+        memory_gb: float | None = None,
     ) -> str:
         """Implements RPC PullAndRunImage (request field image_name).
 
@@ -144,6 +145,8 @@ def build_dra_tools(client: DRAGrpcClient, machine_repo: MachineRepository) -> l
             kwargs["command"] = cmd
         if rp:
             kwargs["restart_policy"] = rp
+        if memory_gb is not None:
+            kwargs["memory_gb"] = float(memory_gb)
 
         payload = client.pull_and_run_image(image_name, **kwargs)
         if source:
@@ -164,6 +167,7 @@ async def invoke_pull_and_run_image_via_tool(
     grpc_target: str | None = None,
     command: str | None = None,
     restart_policy: str | None = None,
+    memory_gb: float | None = None,
 ) -> dict[str, Any]:
     tools = build_dra_tools(client, machine_repo)
     rpc_tool = next((tool for tool in tools if tool.name == "pull_and_run_image"), None)
@@ -179,6 +183,8 @@ async def invoke_pull_and_run_image_via_tool(
         payload["command"] = command
     if restart_policy:
         payload["restart_policy"] = restart_policy
+    if memory_gb is not None:
+        payload["memory_gb"] = float(memory_gb)
 
     ctx = SimpleNamespace(tool_name=rpc_tool.name)
     raw_result = await rpc_tool.on_invoke_tool(ctx, json.dumps(payload))

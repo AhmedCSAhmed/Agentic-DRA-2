@@ -34,10 +34,12 @@ def create_dra_agent(
         instructions=instructions
         or (
             "The user's message is the Docker image name to deploy (e.g. nginx:latest, alpine:3.19). "
-            "If no DRA server is running locally, call start_dra_grpc_server first (runs dra/serve.py). "
-            "Then call pull_and_run_image with image_name (PullAndRunImage RPC). "
-            "Optional: list_dra_machines for machine_id → dra_grpc_target; else grpc_target or "
-            "DRA_GRPC_TARGET. Summarize tool JSON clearly."
+            "Always call list_dra_machines first, then pull_and_run_image with image_name and "
+            "machine_id (or grpc_target from the registry) so Docker runs on the cluster host — "
+            "never 127.0.0.1 unless that row is the only machine. "
+            "Do not call start_dra_grpc_server unless the user explicitly asks to run DRA on this machine; "
+            "it starts a local gRPC server and is wrong for normal cluster deploys. "
+            "Summarize tool JSON clearly."
         ),
         tools=tools,
     )

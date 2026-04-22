@@ -41,6 +41,7 @@ class DRAGrpcClient:
         *,
         command: Sequence[str] | None = None,
         restart_policy: str | None = None,
+        memory_gb: float | None = None,
         grpc_target: str | None = None,
         timeout: float | None = DEFAULT_RPC_TIMEOUT_S,
     ) -> dict[str, Any]:
@@ -59,6 +60,8 @@ class DRAGrpcClient:
         rp = (restart_policy or "").strip()
         if rp:
             request.restart_policy = rp
+        if memory_gb is not None:
+            request.memory_gb = float(memory_gb)
         override = (grpc_target or "").strip()
         if override:
             channel = grpc.insecure_channel(override)
@@ -70,6 +73,48 @@ class DRAGrpcClient:
         return self._pull_and_run_with_stub(
             self._stub, request, timeout, connected_to=self._target
         )
+
+    def stop_container(
+        self,
+        container_id: str,
+        *,
+        grpc_target: str | None = None,
+        timeout: float | None = DEFAULT_RPC_TIMEOUT_S,
+    ) -> dict[str, Any]:
+        request = dra_pb2.StopContainerRequest(container_id=(container_id or "").strip())
+        override = (grpc_target or "").strip()
+        if override:
+            channel = grpc.insecure_channel(override)
+            try:
+                stub = dra_pb2_grpc.DRAServiceStub(channel)
+                return self._stop_with_stub(stub, request, timeout, connected_to=override)
+            finally:
+                channel.close()
+        return self._stop_with_stub(self._stub, request, timeout, connected_to=self._target)
+
+    def _stop_with_stub(
+        self,
+        stub: dra_pb2_grpc.DRAServiceStub,
+        request: dra_pb2.StopContainerRequest,
+        timeout: float | None,
+        *,
+        connected_to: str,
+    ) -> dict[str, Any]:
+        try:
+            resp = stub.StopContainer(request, timeout=timeout)
+        except grpc.RpcError as exc:
+            return {
+                "rpc_error": True,
+                "code": exc.code().name,
+                "details": exc.details() or "",
+                "grpc_target": connected_to,
+            }
+        return {
+            "success": resp.success,
+            "message": resp.message,
+            "memory_gb_released": resp.memory_gb_released,
+            "grpc_target": connected_to,
+        }
 
     def _pull_and_run_with_stub(
         self,

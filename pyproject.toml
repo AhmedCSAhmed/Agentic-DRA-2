@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "atlas-dra"
+version = "0.1.0"
+requires-python = ">=3.11"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["cli*", "agent*", "dra*", "routes*"]
+
+[tool.setuptools]
+py-modules = ["atlas_cli", "dra_pb2", "dra_pb2_grpc", "scheduled_deploy"]
+
+[project.scripts]
+atlas = "atlas_cli:app"

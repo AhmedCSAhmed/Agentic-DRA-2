@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
-from dotenv import load_dotenv
+from dra.env import load_dotenv_for
 
 _loaded = False
 
@@ -19,6 +17,5 @@ def load_project_dotenv() -> None:
     global _loaded
     if _loaded:
         return
-    root = Path(__file__).resolve().parent.parent
-    load_dotenv(root / ".env", override=False)
+    load_dotenv_for(__file__)
     _loaded = True

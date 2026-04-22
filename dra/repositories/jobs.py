@@ -83,6 +83,28 @@ class JobsRepository:
         finally:
             session.close()
 
+    def find_job_by_image_id(self, image_id: str) -> JobModelORM:
+        if not image_id or not image_id.strip():
+            raise InvalidJobDataError("image_id is required")
+
+        session = self._db.start_session()
+        try:
+            job = (
+                session.query(JobModelORM)
+                .filter(JobModelORM.image_id == image_id.strip())
+                .order_by(JobModelORM.created_at.desc())
+                .first()
+            )
+            if job is None:
+                raise JobNotFoundError(f"Job with image_id '{image_id}' was not found")
+            return job
+        except SQLAlchemyError as exc:
+            raise JobsRepositoryDatabaseError(
+                f"Failed to find job by image_id '{image_id}'"
+            ) from exc
+        finally:
+            session.close()
+
     def find_job_by_image_name(self, image_name: str) -> JobModelORM:
         if not image_name or not image_name.strip():
             raise InvalidJobDataError("image_name is required")
