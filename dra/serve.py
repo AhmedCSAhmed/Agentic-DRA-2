@@ -125,10 +125,6 @@ def _resolve_bind(bind: str | None, machine: MachineModelORM | None) -> str:
     if explicit:
         return explicit
 
-    env_bind = _env_bind()
-    if env_bind:
-        return env_bind
-
     if machine is not None:
         derived = _bind_from_machine(machine)
         if derived:
@@ -138,6 +134,10 @@ def _resolve_bind(bind: str | None, machine: MachineModelORM | None) -> str:
             machine.machine_name,
             _default_bind(),
         )
+
+    env_bind = _env_bind()
+    if env_bind:
+        return env_bind
 
     return _default_bind()
 
@@ -171,7 +171,10 @@ def serve(*, bind: str | None = None, machine_name: str | None = None) -> None:
         )
 
     server = grpc.server(concurrent.futures.ThreadPoolExecutor(max_workers=_max_workers()))
-    dra_pb2_grpc.add_DRAServiceServicer_to_server(DRAServiceServicer(), server)
+    dra_pb2_grpc.add_DRAServiceServicer_to_server(
+        DRAServiceServicer(machine_id=(machine.machine_id if machine is not None else None)),
+        server,
+    )
     server.add_insecure_port(address)
     server.start()
     logger.info("DRA gRPC listening on %s (PullAndRunImage -> Docker pull/run)", address)

@@ -39,12 +39,23 @@ class DRAServiceStub(object):
                 request_serializer=dra__pb2.PullAndRunRequest.SerializeToString,
                 response_deserializer=dra__pb2.PullAndRunResponse.FromString,
                 _registered_method=True)
+        self.StopContainer = channel.unary_unary(
+                '/dra.DRAService/StopContainer',
+                request_serializer=dra__pb2.StopContainerRequest.SerializeToString,
+                response_deserializer=dra__pb2.StopContainerResponse.FromString,
+                _registered_method=True)
 
 
 class DRAServiceServicer(object):
     """Missing associated documentation comment in .proto file."""
 
     def PullAndRunImage(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def StopContainer(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -57,6 +68,11 @@ def add_DRAServiceServicer_to_server(servicer, server):
                     servicer.PullAndRunImage,
                     request_deserializer=dra__pb2.PullAndRunRequest.FromString,
                     response_serializer=dra__pb2.PullAndRunResponse.SerializeToString,
+            ),
+            'StopContainer': grpc.unary_unary_rpc_method_handler(
+                    servicer.StopContainer,
+                    request_deserializer=dra__pb2.StopContainerRequest.FromString,
+                    response_serializer=dra__pb2.StopContainerResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -86,6 +102,33 @@ class DRAService(object):
             '/dra.DRAService/PullAndRunImage',
             dra__pb2.PullAndRunRequest.SerializeToString,
             dra__pb2.PullAndRunResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def StopContainer(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/dra.DRAService/StopContainer',
+            dra__pb2.StopContainerRequest.SerializeToString,
+            dra__pb2.StopContainerResponse.FromString,
             options,
             channel_credentials,
             insecure,

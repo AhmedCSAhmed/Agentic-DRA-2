@@ -3,6 +3,7 @@ from __future__ import annotations
 from rich.panel import Panel
 
 from cli.commands.deploy import deploy_via_scheduler_sync, parse_deploy_repl_arg
+from cli.commands.stop import stop as stop_command
 from cli.display import admin_boot_screen, boot_screen, console
 
 
@@ -18,7 +19,7 @@ def _run_deploy(arg: str) -> None:
     console.print(f"\n  Deploying [bold white]{image}[/bold white] (scheduler) ...\n")
     try:
         with console.status(
-            "[purple]Selecting machine from registry and pulling on remote host...[/purple]",
+            "[purple]Agent selecting machine from registry and pulling on remote host...[/purple]",
             spinner="dots",
             spinner_style="bright_magenta",
         ):
@@ -112,8 +113,9 @@ def _show_help(admin: bool = False) -> None:
         "    [bold white]deploy [italic]<image>[/italic][/bold white]   "
         "[grey69][--memory-gb N] [--machine-type T] [--command \"...\"] [--restart-policy unless-stopped][/grey69]"
     )
-    if admin:
-        console.print("    [bold white]status[/bold white]           Show all registered machines")
+    console.print("    [bold white]stop [italic]<container_id>[/italic][/bold white]    Stop a deployment and release reserved memory")
+    console.print("    [bold white]off [italic]<container_id>[/italic][/bold white]     Alias for stop")
+    console.print("    [bold white]status[/bold white]          Show machines")
     console.print("    [bold white]help[/bold white]             Show this message")
     console.print("    [bold white]q[/bold white]                Quit")
     console.print()
@@ -157,11 +159,14 @@ def run_repl(admin: bool = False) -> None:
             else:
                 _run_deploy(arg)
 
-        elif cmd == "status":
-            if admin:
-                _run_status()
+        elif cmd in ("stop", "off"):
+            if not arg:
+                console.print("\n  [red]Usage:[/red] stop [italic]<container_id>[/italic]\n")
             else:
-                console.print("\n  [red]Invalid command:[/red] status  [grey69](admin only)[/grey69]\n")
+                stop_command(arg)
+
+        elif cmd == "status":
+            _run_status()
 
         elif cmd in ("help", "?", "--help", "-h"):
             _show_help(admin=admin)

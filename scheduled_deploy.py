@@ -100,6 +100,7 @@ async def execute_scheduled_deploy(
                 machine_id=candidate.machine_id,
                 command=command,
                 restart_policy=restart_policy,
+                memory_gb=resource_requirements.memory_gb,
                 grpc_target=candidate.grpc_target,
             )
             attempts.append(_attempt_record(candidate, rpc_result))

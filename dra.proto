@@ -4,6 +4,7 @@ package dra;
 
 service DRAService {
   rpc PullAndRunImage(PullAndRunRequest) returns (PullAndRunResponse);
+  rpc StopContainer(StopContainerRequest) returns (StopContainerResponse);
 }
 
 enum WorkloadState {
@@ -21,6 +22,9 @@ message PullAndRunRequest {
   // Docker --restart value: no | on-failure | always | unless-stopped (or on-failure:N). Empty uses DRA_DOCKER_RESTART_POLICY env if set.
   // "unless-stopped" is typical for long-running services: survives crashes/reboots until docker stop/rm.
   string restart_policy = 3;
+  // Scheduler reservation: minimum memory (GB) to reserve for this deployment on the chosen machine.
+  // The server uses this to decrement machines.available_gb and to persist job metadata.
+  float memory_gb = 4;
 }
 
 message PullAndRunResponse {
@@ -30,4 +34,15 @@ message PullAndRunResponse {
   float cpu_used = 4;
   float memory_gb_used = 5;
   string message = 6;
+}
+
+message StopContainerRequest {
+  string container_id = 1;
+}
+
+message StopContainerResponse {
+  bool success = 1;
+  string message = 2;
+  // Memory released back to the machine (GB), when known.
+  float memory_gb_released = 3;
 }

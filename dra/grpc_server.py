@@ -37,6 +37,10 @@ class DRAServiceServicer(dra_pb2_grpc.DRAServiceServicer):
         r"^(no|on-failure|always|unless-stopped|on-failure:\d+)$"
     )
 
+    def __init__(self, *, machine_id: str | None = None) -> None:
+        super().__init__()
+        self._machine_id = (machine_id or "").strip() or None
+
     def PullAndRunImage(self, request, context):
         """Pulls an image if needed, runs a container, and returns runtime metrics.
 
@@ -68,7 +72,20 @@ class DRAServiceServicer(dra_pb2_grpc.DRAServiceServicer):
                 "Invalid restart_policy (use no, on-failure, always, unless-stopped, or on-failure:N)"
             )
 
+        reserved_gb = float(getattr(request, "memory_gb", 0.0) or 0.0)
+        if reserved_gb < 0:
+            context.set_code(grpc.StatusCode.INVALID_ARGUMENT)
+            context.set_details("memory_gb must be >= 0")
+            return self._error_response("memory_gb must be >= 0")
+
+        reserved_applied = False
+        succeeded = False
         try:
+            # Reserve capacity in DB before starting the container.
+            if self._machine_id and reserved_gb > 0:
+                self._apply_capacity_delta(delta_gb=-reserved_gb)
+                reserved_applied = True
+
             pulled = self.pull_image(image_name)
             cmd_args = self._resolve_run_command(request)
             container_id = self.run_container(
@@ -77,6 +94,14 @@ class DRAServiceServicer(dra_pb2_grpc.DRAServiceServicer):
                 restart_policy=restart_policy,
             )
             cpu_used, memory_gb_used = self.get_metrics()
+
+            # Persist a job record for stop/release bookkeeping (best-effort).
+            if self._machine_id:
+                self._record_job_started(
+                    container_id=container_id,
+                    image_name=image_name,
+                    reserved_gb=reserved_gb,
+                )
 
             message = (
                 f"Image '{image_name}' pulled and container started successfully."
@@ -90,6 +115,7 @@ class DRAServiceServicer(dra_pb2_grpc.DRAServiceServicer):
                 cpu_used,
                 memory_gb_used,
             )
+            succeeded = True
             return dra_pb2.PullAndRunResponse(
                 success=True,
                 container_id=container_id,
@@ -116,6 +142,41 @@ class DRAServiceServicer(dra_pb2_grpc.DRAServiceServicer):
             context.set_code(grpc.StatusCode.INTERNAL)
             context.set_details("Unexpected server error")
             return self._error_response(f"Unexpected error: {exc}")
+        finally:
+            # If anything failed after reserving capacity, release it back.
+            if reserved_applied and not succeeded:
+                try:
+                    self._apply_capacity_delta(delta_gb=reserved_gb)
+                except Exception:
+                    logger.exception("Failed to rollback reserved capacity for machine_id=%s", self._machine_id)
+
+    def StopContainer(self, request, context):
+        container_id = (request.container_id or "").strip()
+        if not container_id:
+            context.set_code(grpc.StatusCode.INVALID_ARGUMENT)
+            context.set_details("container_id is required")
+            return dra_pb2.StopContainerResponse(success=False, message="container_id is required", memory_gb_released=0.0)
+
+        try:
+            self._run_command(["docker", "rm", "-f", container_id], timeout=self.COMMAND_TIMEOUT_SECONDS)
+        except subprocess.TimeoutExpired as exc:
+            context.set_code(grpc.StatusCode.INTERNAL)
+            context.set_details(str(exc))
+            return dra_pb2.StopContainerResponse(success=False, message="docker rm timed out", memory_gb_released=0.0)
+        except subprocess.CalledProcessError as exc:
+            context.set_code(grpc.StatusCode.INTERNAL)
+            context.set_details(self._stderr_or_stdout(exc))
+            return dra_pb2.StopContainerResponse(success=False, message=self._stderr_or_stdout(exc), memory_gb_released=0.0)
+
+        released = 0.0
+        if self._machine_id:
+            released = self._record_job_stopped_and_release(container_id=container_id)
+
+        return dra_pb2.StopContainerResponse(
+            success=True,
+            message=f"Container '{container_id}' stopped/removed",
+            memory_gb_released=float(released),
+        )
 
     def pull_image(self, image_name: str) -> bool:
         """Pulls a Docker image when it is not already available locally.
@@ -209,6 +270,57 @@ class DRAServiceServicer(dra_pb2_grpc.DRAServiceServicer):
 
         logger.info("Container started: image=%s container_id=%s", image_name, container_id)
         return container_id
+
+    def _apply_capacity_delta(self, *, delta_gb: float) -> None:
+        """Best-effort update of machines.available_gb for this server's machine_id."""
+        from dra.database import Database
+        from dra.repositories.machines import MachineRepository
+
+        if not self._machine_id:
+            return
+        repo = MachineRepository(Database())
+        repo.increment_machine_availability(self._machine_id, delta_gb=float(delta_gb))
+
+    def _record_job_started(self, *, container_id: str, image_name: str, reserved_gb: float) -> None:
+        from dra.database import Database
+        from dra.repositories.jobs import JobsRepository
+
+        repo = JobsRepository(Database())
+        repo.create_job(
+            image_id=container_id,
+            image_name=image_name,
+            status="RUNNING",
+            resource_requirements={"memory_gb": float(reserved_gb), "machine_id": self._machine_id},
+        )
+
+    def _record_job_stopped_and_release(self, *, container_id: str) -> float:
+        """Mark job STOPPED and release reserved memory back to this machine."""
+        from dra.database import Database
+        from dra.repositories.jobs import JobNotFoundError, JobsRepository
+
+        db = Database()
+        repo = JobsRepository(db)
+        try:
+            job = repo.find_job_by_image_id(container_id)
+        except JobNotFoundError:
+            return 0.0
+
+        reserved = 0.0
+        rr = getattr(job, "resource_requirements", None)
+        if isinstance(rr, dict):
+            raw = rr.get("memory_gb")
+            if isinstance(raw, (int, float)):
+                reserved = float(raw)
+
+        # Update job status best-effort.
+        try:
+            repo.update_job_status(job.id, "STOPPED")
+        except Exception:
+            logger.exception("Failed to update job status for container_id=%s", container_id)
+
+        if reserved > 0:
+            self._apply_capacity_delta(delta_gb=reserved)
+        return reserved
 
     def get_metrics(self) -> tuple[float, float]:
         """Collects host-level CPU usage percent and used memory in GB."""

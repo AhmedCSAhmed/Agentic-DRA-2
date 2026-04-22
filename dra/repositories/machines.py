@@ -228,6 +228,55 @@ class MachineRepository:
         finally:
             session.close()
 
+    def increment_machine_availability(
+        self,
+        machine_id: str,
+        *,
+        delta_gb: int | float,
+        floor_at_zero: bool = True,
+    ) -> MachineModelORM:
+        """Atomically adjust ``machines.available_gb`` by ``delta_gb``.
+
+        This avoids read-modify-write races when multiple deployments update the same machine.
+        """
+
+        self._validate_machine_id(machine_id)
+        if isinstance(delta_gb, bool) or not isinstance(delta_gb, (int, float)):
+            raise InvalidMachineDataError("delta_gb must be numeric")
+        if not isfinite(float(delta_gb)):
+            raise InvalidMachineDataError("delta_gb must be finite")
+
+        session = self._db.start_session()
+        session.expire_on_commit = False
+        try:
+            machine = (
+                session.query(MachineModelORM)
+                .filter(MachineModelORM.machine_id == machine_id)
+                .with_for_update()
+                .first()
+            )
+            if machine is None:
+                raise MachineNotFoundError(
+                    f"Machine with machine_id '{machine_id}' was not found"
+                )
+
+            current = float(getattr(machine, "available_gb", 0.0) or 0.0)
+            new_val = current + float(delta_gb)
+            if floor_at_zero and new_val < 0:
+                new_val = 0.0
+
+            setattr(machine, "available_gb", float(new_val))
+            setattr(machine, "machine_updated_at", self._now())
+            session.commit()
+            return machine
+        except SQLAlchemyError as exc:
+            session.rollback()
+            raise MachineRepositoryDatabaseError(
+                f"Failed to increment availability for machine '{machine_id}'"
+            ) from exc
+        finally:
+            session.close()
+
     def delete_machine(self, machine_id: str) -> None:
         self._validate_machine_id(machine_id)
 

@@ -57,6 +57,14 @@ def boot_screen() -> None:
         "      [grey69]Deploy via scheduler (use --memory-gb to require free RAM)[/grey69]"
     )
     console.print(
+        "    [bold white]stop [italic]<container_id>[/italic][/bold white]"
+        "    [grey69]Stop a deployment and release reserved memory[/grey69]"
+    )
+    console.print(
+        "    [bold white]status[/bold white]"
+        "                [grey69]Show machines[/grey69]"
+    )
+    console.print(
         "    [bold white]help[/bold white]"
         "               [grey69]Show all commands[/grey69]"
     )
@@ -127,6 +135,10 @@ def admin_boot_screen() -> None:
     console.print(
         "    [bold white]deploy [italic]<image>[/italic][/bold white]"
         "      [grey69]Deploy a container to the best available machine[/grey69]"
+    )
+    console.print(
+        "    [bold white]stop [italic]<container_id>[/italic][/bold white]"
+        "        [grey69]Stop a deployment and release reserved memory[/grey69]"
     )
     console.print(
         "    [bold white]status[/bold white]"
