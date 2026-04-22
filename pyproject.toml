@@ -12,7 +12,7 @@ where = ["."]
 include = ["cli*", "agent*", "dra*", "routes*"]
 
 [tool.setuptools]
-py-modules = ["dra_pb2", "dra_pb2_grpc"]
+py-modules = ["atlas_cli", "dra_pb2", "dra_pb2_grpc", "scheduled_deploy"]
 
 [project.scripts]
-atlas = "cli.__main__:app"
+atlas = "atlas_cli:app"

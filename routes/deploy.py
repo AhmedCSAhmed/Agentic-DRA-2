@@ -5,44 +5,23 @@ from uuid import uuid4
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 
-from agent.client import DRAGrpcClient
-from agent.tools import invoke_pull_and_run_image_via_tool
-from dra.database import Database
-from dra.repositories.machines import MachineRepository
+from scheduled_deploy import execute_scheduled_deploy
 
-from .contracts import DeployRequest, MachineCandidate, make_no_capacity_error
-from .scheduler import select_best_machine
+from .contracts import DeployRequest, make_no_capacity_error
 
 router = APIRouter()
-machine_repository = MachineRepository(Database())
-
-
-def _load_scheduler_candidates(machine_type: str | None) -> list[MachineCandidate]:
-    rows = machine_repository.list_machines(machine_type=machine_type)
-    candidates: list[MachineCandidate] = []
-    for row in rows:
-        grpc_target = (getattr(row, "dra_grpc_target", None) or "").strip()
-        if not grpc_target:
-            continue
-        available_gb = getattr(row, "available_gb", None)
-        if not isinstance(available_gb, (int, float)):
-            continue
-        candidates.append(
-            MachineCandidate(
-                machine_id=row.machine_id,
-                machine_type=row.machine_type,
-                grpc_target=grpc_target,
-                available_gb=float(available_gb),
-            )
-        )
-    return candidates
 
 
 @router.post("/deploy")
 async def deploy(request: DeployRequest):
     request_id = request.request_id or f"req-{uuid4().hex[:12]}"
-    candidates = _load_scheduler_candidates(request.machine_type)
-    decision = select_best_machine(candidates, request.resource_requirements)
+    decision, rpc_result = await execute_scheduled_deploy(
+        image_name=request.image_name,
+        resource_requirements=request.resource_requirements,
+        machine_type=request.machine_type,
+        command=request.command,
+        restart_policy=request.restart_policy,
+    )
     if decision.selected is None:
         error = make_no_capacity_error(
             request_id=request_id,
@@ -53,18 +32,7 @@ async def deploy(request: DeployRequest):
         )
         return JSONResponse(status_code=409, content=error.model_dump())
 
-    client = DRAGrpcClient()
-    try:
-        rpc_result = await invoke_pull_and_run_image_via_tool(
-            client=client,
-            machine_repo=machine_repository,
-            image_name=request.image_name,
-            command=request.command,
-            restart_policy=request.restart_policy,
-            grpc_target=decision.selected.grpc_target,
-        )
-    finally:
-        client.close()
+    assert rpc_result is not None
 
     if rpc_result.get("error"):
         return JSONResponse(

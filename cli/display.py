@@ -110,7 +110,8 @@ def admin_boot_screen() -> None:
         table.add_column("Status", style="bold green")
 
         for m in machines:
-            mem = f"{m.available_gb:.0f} GB" if getattr(m, "available_gb", None) else "—"
+            raw_mem = getattr(m, "available_gb", None)
+            mem = f"{raw_mem:.0f} GB" if raw_mem is not None else "—"
             table.add_row(
                 m.machine_name or m.machine_id,
                 m.machine_type or "—",

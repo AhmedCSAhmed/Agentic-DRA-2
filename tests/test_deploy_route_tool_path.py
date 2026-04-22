@@ -26,9 +26,9 @@ class DeployRouteToolPathTests(unittest.TestCase):
             request_id="req-123",
         )
 
-        with patch("routes.deploy._load_scheduler_candidates", return_value=[candidate]):
+        with patch("scheduled_deploy._load_scheduler_candidates", return_value=[candidate]):
             with patch(
-                "routes.deploy.invoke_pull_and_run_image_via_tool",
+                "scheduled_deploy.invoke_pull_and_run_image_via_tool",
                 new_callable=AsyncMock,
             ) as mock_invoke:
                 mock_invoke.return_value = {
@@ -39,7 +39,7 @@ class DeployRouteToolPathTests(unittest.TestCase):
                     "memory_gb_used": 4.0,
                     "message": "ok",
                 }
-                with patch("routes.deploy.DRAGrpcClient.close", MagicMock()):
+                with patch("scheduled_deploy.DRAGrpcClient.close", MagicMock()):
                     result = asyncio.run(deploy(request))
 
         self.assertEqual(result["status"], "DEPLOYED")
@@ -50,6 +50,7 @@ class DeployRouteToolPathTests(unittest.TestCase):
         self.assertEqual(kwargs["command"], "sleep infinity")
         self.assertEqual(kwargs["restart_policy"], "unless-stopped")
         self.assertEqual(kwargs["grpc_target"], "10.0.0.2:50051")
+        self.assertEqual(kwargs["machine_id"], "node-2")
 
     def test_deploy_returns_failed_response_when_tool_invocation_errors(self) -> None:
         candidate = MachineCandidate(
@@ -64,13 +65,13 @@ class DeployRouteToolPathTests(unittest.TestCase):
             request_id="req-123",
         )
 
-        with patch("routes.deploy._load_scheduler_candidates", return_value=[candidate]):
+        with patch("scheduled_deploy._load_scheduler_candidates", return_value=[candidate]):
             with patch(
-                "routes.deploy.invoke_pull_and_run_image_via_tool",
+                "scheduled_deploy.invoke_pull_and_run_image_via_tool",
                 new_callable=AsyncMock,
             ) as mock_invoke:
                 mock_invoke.return_value = {"error": True, "message": "tool failed"}
-                with patch("routes.deploy.DRAGrpcClient.close", MagicMock()):
+                with patch("scheduled_deploy.DRAGrpcClient.close", MagicMock()):
                     result = asyncio.run(deploy(request))
 
         self.assertIsInstance(result, JSONResponse)

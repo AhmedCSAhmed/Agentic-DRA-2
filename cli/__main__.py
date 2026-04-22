@@ -12,6 +12,7 @@ if str(_PROJECT_ROOT) not in sys.path:
 
 import typer
 
+from cli.commands.deploy import deploy as atlas_deploy_command
 from cli.display import console
 from cli.repl import run_repl
 
@@ -54,6 +55,9 @@ def main(
             raise typer.Exit(1)
     else:
         run_repl(admin=False)
+
+
+app.command("deploy")(atlas_deploy_command)
 
 
 if __name__ == "__main__":

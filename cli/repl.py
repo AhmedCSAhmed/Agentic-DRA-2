@@ -1,32 +1,53 @@
 from __future__ import annotations
 
-import asyncio
-
 from rich.panel import Panel
 
+from cli.commands.deploy import deploy_via_scheduler_sync, parse_deploy_repl_arg
 from cli.display import admin_boot_screen, boot_screen, console
 
 
-def _run_deploy(image: str) -> None:
-    console.print(f"\n  Deploying [bold white]{image}[/bold white] ...\n")
+def _run_deploy(arg: str) -> None:
+    image, memory_gb, machine_type, command, restart_policy = parse_deploy_repl_arg(arg)
+    if not image:
+        console.print(
+            "\n  [red]Usage:[/red] deploy [italic]<image>[/italic] "
+            "[grey69][--memory-gb N] [--machine-type T] [--command \"...\"] [--restart-policy unless-stopped][/grey69]\n"
+        )
+        return
+
+    console.print(f"\n  Deploying [bold white]{image}[/bold white] (scheduler) ...\n")
     try:
         with console.status(
-            "[purple]Agent is selecting a machine and pulling the image...[/purple]",
+            "[purple]Selecting machine from registry and pulling on remote host...[/purple]",
             spinner="dots",
             spinner_style="bright_magenta",
         ):
-            from agent.run import run_dra_agent
-            result = asyncio.run(run_dra_agent(image))
-            output = result.final_output or ""
-
-        console.print(
-            Panel(
-                f"[bold green]✓  Deployed[/bold green]  [white]{image}[/white]\n\n"
-                f"[grey69]{output}[/grey69]",
-                border_style="purple",
-                padding=(1, 2),
+            ok, output = deploy_via_scheduler_sync(
+                image,
+                memory_gb=memory_gb,
+                machine_type=machine_type,
+                command=command,
+                restart_policy=restart_policy,
             )
-        )
+
+        if ok:
+            console.print(
+                Panel(
+                    f"[bold green]✓  Deployed[/bold green]  [white]{image}[/white]\n\n"
+                    f"[grey69]{output}[/grey69]",
+                    border_style="purple",
+                    padding=(1, 2),
+                )
+            )
+        else:
+            console.print(
+                Panel(
+                    f"[bold red]✗  Deployment failed[/bold red]  [white]{image}[/white]\n\n"
+                    f"[grey69]{output}[/grey69]",
+                    border_style="red",
+                    padding=(1, 2),
+                )
+            )
     except Exception as exc:
         console.print(
             Panel(
@@ -67,7 +88,8 @@ def _run_status() -> None:
         table.add_column("Status", style="bold green")
 
         for m in machines:
-            mem = f"{m.available_gb:.0f} GB" if getattr(m, "available_gb", None) else "—"
+            raw_mem = getattr(m, "available_gb", None)
+            mem = f"{raw_mem:.0f} GB" if raw_mem is not None else "—"
             table.add_row(
                 m.machine_name or m.machine_id,
                 m.machine_type or "—",
@@ -86,7 +108,9 @@ def _run_status() -> None:
 def _show_help(admin: bool = False) -> None:
     console.print()
     console.print("  [grey69]Available commands:[/grey69]")
-    console.print("    [bold white]deploy [italic]<image>[/italic][/bold white]   Deploy a container to the best available machine")
+    console.print(
+        "    [bold white]deploy [italic]<image>[/italic][/bold white]   Deploy via DB scheduler (remote gRPC), not the LLM agent"
+    )
     if admin:
         console.print("    [bold white]status[/bold white]           Show all registered machines")
     console.print("    [bold white]help[/bold white]             Show this message")
@@ -125,7 +149,10 @@ def run_repl(admin: bool = False) -> None:
 
         if cmd == "deploy":
             if not arg:
-                console.print("\n  [red]Usage:[/red] deploy [italic]<image>[/italic]\n")
+                console.print(
+                    "\n  [red]Usage:[/red] deploy [italic]<image>[/italic] "
+                    "[grey69][--memory-gb N] [--machine-type T] ...[/grey69]\n"
+                )
             else:
                 _run_deploy(arg)
 

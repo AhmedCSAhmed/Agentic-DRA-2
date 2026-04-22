@@ -103,6 +103,29 @@ class MachineRepository:
         finally:
             session.close()
 
+    def find_machine_by_name(self, machine_name: str) -> MachineModelORM:
+        self._validate_machine_name(machine_name)
+
+        normalized_name = machine_name.strip()
+        session = self._db.start_session()
+        try:
+            machine = (
+                session.query(MachineModelORM)
+                .filter(MachineModelORM.machine_name == normalized_name)
+                .first()
+            )
+            if machine is None:
+                raise MachineNotFoundError(
+                    f"Machine with machine_name '{normalized_name}' was not found"
+                )
+            return machine
+        except SQLAlchemyError as exc:
+            raise MachineRepositoryDatabaseError(
+                f"Failed to find machine by name '{normalized_name}'"
+            ) from exc
+        finally:
+            session.close()
+
     def list_machines(self, machine_type: str | None = None) -> list[MachineModelORM]:
         if machine_type is not None:
             self._validate_machine_type(machine_type)
@@ -165,6 +188,42 @@ class MachineRepository:
             session.rollback()
             raise MachineRepositoryDatabaseError(
                 f"Failed to update machine '{machine_id}'"
+            ) from exc
+        finally:
+            session.close()
+
+    def update_machine_availability(
+        self,
+        machine_id: str,
+        *,
+        available_gb: int | float,
+    ) -> MachineModelORM:
+        self._validate_machine_id(machine_id)
+        normalized_available_gb = self._normalize_available_gb_value(
+            machine_id, available_gb
+        )
+
+        session = self._db.start_session()
+        session.expire_on_commit = False
+        try:
+            machine = (
+                session.query(MachineModelORM)
+                .filter(MachineModelORM.machine_id == machine_id)
+                .first()
+            )
+            if machine is None:
+                raise MachineNotFoundError(
+                    f"Machine with machine_id '{machine_id}' was not found"
+                )
+
+            setattr(machine, "available_gb", normalized_available_gb)
+            setattr(machine, "machine_updated_at", self._now())
+            session.commit()
+            return machine
+        except SQLAlchemyError as exc:
+            session.rollback()
+            raise MachineRepositoryDatabaseError(
+                f"Failed to update availability for machine '{machine_id}'"
             ) from exc
         finally:
             session.close()
@@ -305,20 +364,29 @@ class MachineRepository:
 
         normalized: dict[str, float] = {}
         for machine_id, available_gb in available_gb_by_machine_id.items():
-            if not machine_id or not machine_id.strip():
-                raise InvalidMachineDataError("availability map contains invalid machine_id")
-            if isinstance(available_gb, bool) or not isinstance(available_gb, (int, float)):
-                raise InvalidMachineDataError(
-                    f"available_gb for machine '{machine_id}' must be numeric"
-                )
-            availability_value = float(available_gb)
-            if availability_value < 0:
-                raise InvalidMachineDataError(
-                    f"available_gb for machine '{machine_id}' must be >= 0"
-                )
-            if not isfinite(availability_value):
-                raise InvalidMachineDataError(
-                    f"available_gb for machine '{machine_id}' must be finite"
-                )
-            normalized[machine_id] = availability_value
+            normalized[machine_id] = MachineRepository._normalize_available_gb_value(
+                machine_id, available_gb
+            )
         return normalized
+
+    @staticmethod
+    def _normalize_available_gb_value(
+        machine_id: str,
+        available_gb: int | float,
+    ) -> float:
+        if not machine_id or not machine_id.strip():
+            raise InvalidMachineDataError("availability map contains invalid machine_id")
+        if isinstance(available_gb, bool) or not isinstance(available_gb, (int, float)):
+            raise InvalidMachineDataError(
+                f"available_gb for machine '{machine_id}' must be numeric"
+            )
+        availability_value = float(available_gb)
+        if availability_value < 0:
+            raise InvalidMachineDataError(
+                f"available_gb for machine '{machine_id}' must be >= 0"
+            )
+        if not isfinite(availability_value):
+            raise InvalidMachineDataError(
+                f"available_gb for machine '{machine_id}' must be finite"
+            )
+        return availability_value

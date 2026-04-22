@@ -46,6 +46,21 @@ class MachineRepositoryTests(unittest.TestCase):
         with self.assertRaises(MachineNotFoundError):
             self.repository.find_machine_by_id("node-missing")
 
+    def test_find_machine_by_name_returns_exact_match(self) -> None:
+        machine = MachineModelORM(
+            machine_id="node-1",
+            machine_name="worker-1",
+            machine_type="cpu",
+            machine_created_at=datetime.now(timezone.utc),
+            machine_updated_at=datetime.now(timezone.utc),
+        )
+        self.session.query.return_value.filter.return_value.first.return_value = machine
+
+        result = self.repository.find_machine_by_name(" worker-1 ")
+
+        self.assertEqual(result.machine_id, "node-1")
+        self.assertEqual(result.machine_name, "worker-1")
+
     def test_update_machine_metadata_updates_timestamp(self) -> None:
         earlier = datetime.now(timezone.utc) - timedelta(minutes=5)
         machine = MachineModelORM(
@@ -63,6 +78,27 @@ class MachineRepositoryTests(unittest.TestCase):
 
         self.assertEqual(result.machine_name, "worker-new")
         self.assertEqual(result.machine_type, "cpu")
+        self.assertGreater(result.machine_updated_at, earlier)
+        self.session.commit.assert_called_once()
+
+    def test_update_machine_availability_updates_value_and_timestamp(self) -> None:
+        earlier = datetime.now(timezone.utc) - timedelta(minutes=5)
+        machine = MachineModelORM(
+            machine_id="node-2",
+            machine_name="worker-old",
+            machine_type="cpu",
+            machine_created_at=earlier,
+            machine_updated_at=earlier,
+            available_gb=0.0,
+        )
+        self.session.query.return_value.filter.return_value.first.return_value = machine
+
+        result = self.repository.update_machine_availability(
+            "node-2",
+            available_gb=7.75,
+        )
+
+        self.assertEqual(result.available_gb, 7.75)
         self.assertGreater(result.machine_updated_at, earlier)
         self.session.commit.assert_called_once()
 
