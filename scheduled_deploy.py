@@ -11,6 +11,7 @@ from typing import Any
 from agent.client import DRAGrpcClient
 from agent.tools import invoke_pull_and_run_image_via_tool
 from dra.database import Database
+from dra.repositories.jobs import JobsRepository
 from dra.repositories.machines import MachineRepository
 
 from routes.contracts import MachineCandidate, ResourceRequirements, SchedulerDecision
@@ -110,6 +111,36 @@ async def execute_scheduled_deploy(
 
             final_result = dict(rpc_result)
             final_result["attempts"] = attempts
+
+            # Ensure stop() can find this container later via jobs table even if the
+            # remote DRA server isn't running with a DB-linked machine identity.
+            if final_result.get("success") and final_result.get("container_id"):
+                # DB accounting: reserve the requested memory on the selected machine.
+                try:
+                    req_gb = float(resource_requirements.memory_gb or 0.0)
+                except Exception:
+                    req_gb = 0.0
+                if req_gb > 0:
+                    try:
+                        _machine_repository.increment_machine_availability(
+                            candidate.machine_id, delta_gb=-req_gb
+                        )
+                    except Exception:
+                        pass
+
+                try:
+                    JobsRepository(Database()).create_job(
+                        image_id=str(final_result.get("container_id")),
+                        image_name=image_name,
+                        status="RUNNING",
+                        resource_requirements={
+                            "memory_gb": float(resource_requirements.memory_gb),
+                            "machine_id": candidate.machine_id,
+                        },
+                    )
+                except Exception:
+                    pass
+
             return (
                 SchedulerDecision(
                     selected=candidate,

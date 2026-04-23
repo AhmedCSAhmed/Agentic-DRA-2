@@ -37,7 +37,6 @@ from dra.models import MachineModelORM
 
 logger = logging.getLogger(__name__)
 
-
 def _default_bind() -> str:
     return "0.0.0.0:50051"
 

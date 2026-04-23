@@ -9,13 +9,13 @@ Base = declarative_base()
 
 class JobModelORM(Base):
     __tablename__ = "jobs"
-    id = Column(Integer, primary_key=True)
-    image_id = Column(String, nullable=False)
+    id = Column[int](Integer, primary_key=True)
+    image_id = Column[str](String, nullable=False)
     resource_requirements = Column[Any](JSONB, nullable=False)
-    image_name = Column(String, nullable=False)
+    image_name = Column[str](String, nullable=False)
     status = Column[str](String, nullable=False)
     created_at = Column[datetime](DateTime, nullable=False)
-    updated_at = Column(DateTime, nullable=False)
+    updated_at = Column[datetime](DateTime, nullable=False)
     
     
 class MachineModelORM(Base):

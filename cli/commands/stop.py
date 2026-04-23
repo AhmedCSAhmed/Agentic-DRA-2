@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 import typer
 from rich.panel import Panel
 
@@ -34,13 +36,33 @@ def stop(container_id: str = typer.Argument(..., help="Docker container id to st
         job = jobs.find_job_by_image_id(cid)
 
         rr = getattr(job, "resource_requirements", None)
-        machine_id: str | None = None
+        rr_obj: dict | None = None
         if isinstance(rr, dict):
-            raw_mid = rr.get("machine_id")
-            if isinstance(raw_mid, str) and raw_mid.strip():
-                machine_id = raw_mid.strip()
+            rr_obj = rr
+        elif isinstance(rr, str) and rr.strip():
+            try:
+                parsed = json.loads(rr)
+                if isinstance(parsed, dict):
+                    rr_obj = parsed
+            except json.JSONDecodeError:
+                rr_obj = None
 
-        if not machine_id:
+        resolved_machine_id: str | None = None
+        reserved_gb: float = 0.0
+        if isinstance(rr_obj, dict):
+            raw_mid = rr_obj.get("machine_id")
+            if isinstance(raw_mid, str) and raw_mid.strip():
+                resolved_machine_id = raw_mid.strip()
+            raw_mem = rr_obj.get("memory_gb")
+            if isinstance(raw_mem, (int, float)):
+                reserved_gb = float(raw_mem)
+            elif isinstance(raw_mem, str) and raw_mem.strip():
+                try:
+                    reserved_gb = float(raw_mem.strip())
+                except ValueError:
+                    reserved_gb = 0.0
+
+        if not resolved_machine_id:
             console.print(
                 Panel(
                     f"[bold red]✗  Stop failed[/bold red]\n\n"
@@ -51,13 +73,13 @@ def stop(container_id: str = typer.Argument(..., help="Docker container id to st
             )
             raise typer.Exit(1)
 
-        machine = machines.find_machine_by_id(machine_id)
+        machine = machines.find_machine_by_id(resolved_machine_id)
         grpc_target = (getattr(machine, "dra_grpc_target", None) or "").strip()
         if not grpc_target:
             console.print(
                 Panel(
                     f"[bold red]✗  Stop failed[/bold red]\n\n"
-                    f"[grey69]Machine '{machine_id}' has no dra_grpc_target in DB.[/grey69]",
+                    f"[grey69]Machine '{resolved_machine_id}' has no dra_grpc_target in DB.[/grey69]",
                     border_style="red",
                     padding=(1, 2),
                 )
@@ -93,11 +115,24 @@ def stop(container_id: str = typer.Argument(..., help="Docker container id to st
             )
             raise typer.Exit(1)
 
+        # Update DB bookkeeping regardless of what the remote gRPC server does.
+        try:
+            jobs.update_job_status(job.id, "STOPPED")
+        except Exception:
+            pass
+        if reserved_gb > 0:
+            try:
+                machines.increment_machine_availability(resolved_machine_id, delta_gb=reserved_gb)
+            except Exception:
+                pass
+
         released = float(result.get("memory_gb_released") or 0.0)
+        if released <= 0.0 and reserved_gb > 0:
+            released = reserved_gb
         console.print(
             Panel(
                 f"[bold green]✓  Stopped[/bold green]  [white]{cid}[/white]\n\n"
-                f"[grey69]- Machine: {machine_id} → {grpc_target}\n"
+                f"[grey69]- Machine: {resolved_machine_id} → {grpc_target}\n"
                 f"- Memory released: {released:.2f} GB\n"
                 f"- {result.get('message','')}[/grey69]",
                 border_style="purple",
