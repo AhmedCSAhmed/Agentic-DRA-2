@@ -27,5 +27,7 @@ class MachineModelORM(Base):
     machine_updated_at = Column(DateTime, nullable=False)
     dra_grpc_target = Column(String, nullable=True)
     available_gb = Column(Float, nullable=True)
+    available_cores = Column(Float, nullable=True)
+    last_heartbeat_at = Column(DateTime, nullable=True)
 
-    
+

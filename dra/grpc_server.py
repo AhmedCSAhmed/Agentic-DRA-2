@@ -7,6 +7,8 @@ import os
 import re
 import shlex
 import subprocess
+import threading
+import time
 from typing import Sequence
 
 import grpc
@@ -40,6 +42,9 @@ class DRAServiceServicer(dra_pb2_grpc.DRAServiceServicer):
     def __init__(self, *, machine_id: str | None = None) -> None:
         super().__init__()
         self._machine_id = (machine_id or "").strip() or None
+        if self._machine_id:
+            t = threading.Thread(target=self._heartbeat_loop, daemon=True)
+            t.start()
 
     def PullAndRunImage(self, request, context):
         """Pulls an image if needed, runs a container, and returns runtime metrics.
@@ -78,13 +83,23 @@ class DRAServiceServicer(dra_pb2_grpc.DRAServiceServicer):
             context.set_details("memory_gb must be >= 0")
             return self._error_response("memory_gb must be >= 0")
 
+        reserved_cores = float(getattr(request, "cpu_cores", 0.0) or 0.0)
+        if reserved_cores < 0:
+            context.set_code(grpc.StatusCode.INVALID_ARGUMENT)
+            context.set_details("cpu_cores must be >= 0")
+            return self._error_response("cpu_cores must be >= 0")
+
         reserved_applied = False
+        cores_applied = False
         succeeded = False
         try:
-            # Reserve capacity in DB before starting the container.
+            # Reserve memory and cores in DB before starting the container.
             if self._machine_id and reserved_gb > 0:
                 self._apply_capacity_delta(delta_gb=-reserved_gb)
                 reserved_applied = True
+            if self._machine_id and reserved_cores > 0:
+                self._apply_cores_delta(delta_cores=-reserved_cores)
+                cores_applied = True
 
             pulled = self.pull_image(image_name)
             cmd_args = self._resolve_run_command(request)
@@ -93,6 +108,12 @@ class DRAServiceServicer(dra_pb2_grpc.DRAServiceServicer):
                 command=cmd_args,
                 restart_policy=restart_policy,
             )
+            if self._machine_id:
+                threading.Thread(
+                    target=self._watch_container,
+                    args=(container_id,),
+                    daemon=True,
+                ).start()
             cpu_used, memory_gb_used = self.get_metrics()
 
             # Persist a job record for stop/release bookkeeping (best-effort).
@@ -101,6 +122,7 @@ class DRAServiceServicer(dra_pb2_grpc.DRAServiceServicer):
                     container_id=container_id,
                     image_name=image_name,
                     reserved_gb=reserved_gb,
+                    reserved_cores=reserved_cores,
                 )
 
             message = (
@@ -149,6 +171,11 @@ class DRAServiceServicer(dra_pb2_grpc.DRAServiceServicer):
                     self._apply_capacity_delta(delta_gb=reserved_gb)
                 except Exception:
                     logger.exception("Failed to rollback reserved capacity for machine_id=%s", self._machine_id)
+            if cores_applied and not succeeded:
+                try:
+                    self._apply_cores_delta(delta_cores=reserved_cores)
+                except Exception:
+                    logger.exception("Failed to rollback reserved cores for machine_id=%s", self._machine_id)
 
     def StopContainer(self, request, context):
         container_id = (request.container_id or "").strip()
@@ -281,7 +308,19 @@ class DRAServiceServicer(dra_pb2_grpc.DRAServiceServicer):
         repo = MachineRepository(Database())
         repo.increment_machine_availability(self._machine_id, delta_gb=float(delta_gb))
 
-    def _record_job_started(self, *, container_id: str, image_name: str, reserved_gb: float) -> None:
+    def _apply_cores_delta(self, *, delta_cores: float) -> None:
+        """Best-effort update of machines.available_cores for this server's machine_id."""
+        from dra.database import Database
+        from dra.repositories.machines import MachineRepository
+
+        if not self._machine_id:
+            return
+        repo = MachineRepository(Database())
+        repo.increment_machine_cores(self._machine_id, delta_cores=float(delta_cores))
+
+    def _record_job_started(
+        self, *, container_id: str, image_name: str, reserved_gb: float, reserved_cores: float = 0.0
+    ) -> None:
         from dra.database import Database
         from dra.repositories.jobs import JobsRepository
 
@@ -290,11 +329,20 @@ class DRAServiceServicer(dra_pb2_grpc.DRAServiceServicer):
             image_id=container_id,
             image_name=image_name,
             status="RUNNING",
-            resource_requirements={"memory_gb": float(reserved_gb), "machine_id": self._machine_id},
+            resource_requirements={
+                "memory_gb": float(reserved_gb),
+                "cpu_cores": float(reserved_cores),
+                "machine_id": self._machine_id,
+            },
         )
 
     def _record_job_stopped_and_release(self, *, container_id: str) -> float:
-        """Mark job STOPPED and release reserved memory back to this machine."""
+        """Mark job STOPPED and release reserved memory and cores back to this machine.
+
+        Idempotent: only releases capacity if the job was still RUNNING (prevents
+        double-release when StopContainer RPC and the container watcher race).
+        Returns the GB released (0.0 if job was already stopped).
+        """
         from dra.database import Database
         from dra.repositories.jobs import JobNotFoundError, JobsRepository
 
@@ -306,21 +354,71 @@ class DRAServiceServicer(dra_pb2_grpc.DRAServiceServicer):
             return 0.0
 
         reserved = 0.0
+        reserved_cores = 0.0
         rr = getattr(job, "resource_requirements", None)
         if isinstance(rr, dict):
             raw = rr.get("memory_gb")
             if isinstance(raw, (int, float)):
                 reserved = float(raw)
+            raw_cores = rr.get("cpu_cores")
+            if isinstance(raw_cores, (int, float)):
+                reserved_cores = float(raw_cores)
 
-        # Update job status best-effort.
+        was_running = False
         try:
-            repo.update_job_status(job.id, "STOPPED")
+            was_running = repo.update_job_status_if_running(job.id)
         except Exception:
-            logger.exception("Failed to update job status for container_id=%s", container_id)
+            logger.exception("Failed to conditionally stop job for container_id=%s", container_id)
 
-        if reserved > 0:
+        if was_running and reserved > 0:
             self._apply_capacity_delta(delta_gb=reserved)
-        return reserved
+        if was_running and reserved_cores > 0:
+            self._apply_cores_delta(delta_cores=reserved_cores)
+        return reserved if was_running else 0.0
+
+    def _watch_container(self, container_id: str) -> None:
+        """Poll until the container exits, then auto-release reserved capacity."""
+        poll_interval = float(os.environ.get("DRA_CONTAINER_POLL_INTERVAL_SECONDS", "30"))
+        while True:
+            time.sleep(poll_interval)
+            try:
+                result = subprocess.run(
+                    ["docker", "inspect", "--format={{.State.Running}}", container_id],
+                    capture_output=True,
+                    text=True,
+                    timeout=self.IMAGE_CHECK_TIMEOUT_SECONDS,
+                )
+                is_running = result.returncode == 0 and result.stdout.strip() == "true"
+            except subprocess.TimeoutExpired:
+                logger.warning("docker inspect timed out for container_id=%s", container_id)
+                continue
+            except Exception:
+                logger.exception("Unexpected error inspecting container_id=%s", container_id)
+                is_running = False
+
+            if not is_running:
+                logger.info(
+                    "Container exited, auto-releasing capacity: container_id=%s", container_id
+                )
+                if self._machine_id:
+                    self._record_job_stopped_and_release(container_id=container_id)
+                break
+
+    def _heartbeat_loop(self) -> None:
+        """Send periodic heartbeats to DB so the scheduler can detect stale machines."""
+        from dra.database import Database
+        from dra.repositories.machines import MachineRepository, MachineRepositoryError
+
+        interval = float(os.environ.get("DRA_HEARTBEAT_INTERVAL_SECONDS", "30"))
+        repo = MachineRepository(Database())
+        while True:
+            time.sleep(interval)
+            try:
+                repo.record_heartbeat(self._machine_id)
+            except MachineRepositoryError:
+                logger.exception("Heartbeat failed for machine_id=%s", self._machine_id)
+            except Exception:
+                logger.exception("Unexpected heartbeat error for machine_id=%s", self._machine_id)
 
     def get_metrics(self) -> tuple[float, float]:
         """Collects host-level CPU usage percent and used memory in GB."""

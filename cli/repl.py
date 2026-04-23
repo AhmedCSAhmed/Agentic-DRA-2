@@ -8,11 +8,11 @@ from cli.display import admin_boot_screen, boot_screen, console
 
 
 def _run_deploy(arg: str) -> None:
-    image, memory_gb, machine_type, command, restart_policy = parse_deploy_repl_arg(arg)
+    image, memory_gb, cpu_cores, machine_type, command, restart_policy = parse_deploy_repl_arg(arg)
     if not image:
         console.print(
             "\n  [red]Usage:[/red] deploy [italic]<image>[/italic] "
-            "[grey69][--memory-gb N] [--machine-type T] [--command \"...\"] [--restart-policy unless-stopped][/grey69]\n"
+            "[grey69][--memory-gb N] [--cpu-cores N] [--machine-type T] [--command \"...\"] [--restart-policy unless-stopped][/grey69]\n"
         )
         return
 
@@ -26,6 +26,7 @@ def _run_deploy(arg: str) -> None:
             ok, output = deploy_via_scheduler_sync(
                 image,
                 memory_gb=memory_gb,
+                cpu_cores=cpu_cores,
                 machine_type=machine_type,
                 command=command,
                 restart_policy=restart_policy,
@@ -73,9 +74,9 @@ def _show_help(admin: bool = False) -> None:
     console.print("  [grey69]Available commands:[/grey69]")
     console.print(
         "    [bold white]deploy [italic]<image>[/italic][/bold white]   "
-        "[grey69][--memory-gb N] [--machine-type T] [--command \"...\"] [--restart-policy unless-stopped][/grey69]"
+        "[grey69][--memory-gb N] [--cpu-cores N] [--machine-type T] [--command \"...\"] [--restart-policy unless-stopped][/grey69]"
     )
-    console.print("    [bold white]stop [italic]<container_id>[/italic][/bold white]    Stop a deployment and release reserved memory")
+    console.print("    [bold white]stop [italic]<container_id>[/italic][/bold white]    Stop a deployment and release reserved memory and cores")
     console.print("    [bold white]off [italic]<container_id>[/italic][/bold white]     Alias for stop")
     console.print("    [bold white]status[/bold white]          Show machines")
     console.print("    [bold white]help[/bold white]             Show this message")

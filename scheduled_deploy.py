@@ -6,6 +6,7 @@ Avoids importing FastAPI so ``atlas`` can run without the API stack installed.
 from __future__ import annotations
 
 import os
+from datetime import datetime
 from typing import Any
 
 from agent.client import DRAGrpcClient
@@ -24,6 +25,7 @@ def _load_scheduler_candidates(machine_type: str | None) -> list[MachineCandidat
     """Build scheduler candidates; missing ``available_gb`` uses env fallback so remotes are not dropped."""
 
     fallback_gb = float(os.environ.get("DRA_SCHEDULER_FALLBACK_AVAILABLE_GB", "64.0"))
+    fallback_cores = float(os.environ.get("DRA_SCHEDULER_FALLBACK_AVAILABLE_CORES", "8.0"))
     rows = _machine_repository.list_machines(machine_type=machine_type)
     candidates: list[MachineCandidate] = []
     for row in rows:
@@ -31,16 +33,19 @@ def _load_scheduler_candidates(machine_type: str | None) -> list[MachineCandidat
         if not grpc_target:
             continue
         raw_gb = getattr(row, "available_gb", None)
-        if isinstance(raw_gb, (int, float)):
-            available_gb = float(raw_gb)
-        else:
-            available_gb = fallback_gb
+        available_gb = float(raw_gb) if isinstance(raw_gb, (int, float)) else fallback_gb
+        raw_cores = getattr(row, "available_cores", None)
+        available_cores = float(raw_cores) if isinstance(raw_cores, (int, float)) else fallback_cores
+        raw_hb = getattr(row, "last_heartbeat_at", None)
+        last_heartbeat_at = raw_hb if isinstance(raw_hb, datetime) else None
         candidates.append(
             MachineCandidate(
                 machine_id=row.machine_id,
                 machine_type=row.machine_type,
                 grpc_target=grpc_target,
                 available_gb=available_gb,
+                available_cores=available_cores,
+                last_heartbeat_at=last_heartbeat_at,
             )
         )
     return candidates
@@ -115,7 +120,7 @@ async def execute_scheduled_deploy(
             # Ensure stop() can find this container later via jobs table even if the
             # remote DRA server isn't running with a DB-linked machine identity.
             if final_result.get("success") and final_result.get("container_id"):
-                # DB accounting: reserve the requested memory on the selected machine.
+                # DB accounting: reserve memory and cores on the selected machine.
                 try:
                     req_gb = float(resource_requirements.memory_gb or 0.0)
                 except Exception:
@@ -129,12 +134,25 @@ async def execute_scheduled_deploy(
                         pass
 
                 try:
+                    req_cores = float(resource_requirements.cpu_cores or 0.0)
+                except Exception:
+                    req_cores = 0.0
+                if req_cores > 0:
+                    try:
+                        _machine_repository.increment_machine_cores(
+                            candidate.machine_id, delta_cores=-req_cores
+                        )
+                    except Exception:
+                        pass
+
+                try:
                     JobsRepository(Database()).create_job(
                         image_id=str(final_result.get("container_id")),
                         image_name=image_name,
                         status="RUNNING",
                         resource_requirements={
                             "memory_gb": float(resource_requirements.memory_gb),
+                            "cpu_cores": float(resource_requirements.cpu_cores or 0.0),
                             "machine_id": candidate.machine_id,
                         },
                     )

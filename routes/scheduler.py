@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import ipaddress
 import os
+from datetime import datetime, timezone
 
 from .contracts import MachineCandidate, ResourceRequirements, SchedulerDecision
 
@@ -72,12 +73,30 @@ def rank_eligible_machines(
                 rejected_reasons.get("machine_type_mismatch", 0) + 1
             )
             continue
-        if candidate.available_gb >= requirements.memory_gb:
-            eligible_candidates.append(candidate)
-        else:
+        if candidate.available_gb < requirements.memory_gb:
             rejected_reasons["insufficient_memory"] = (
                 rejected_reasons.get("insufficient_memory", 0) + 1
             )
+            continue
+
+        if requirements.cpu_cores is not None and candidate.available_cores < requirements.cpu_cores:
+            rejected_reasons["insufficient_cpu"] = (
+                rejected_reasons.get("insufficient_cpu", 0) + 1
+            )
+            continue
+
+        stale_secs = float(os.environ.get("DRA_SCHEDULER_HEARTBEAT_STALE_SECONDS", "120"))
+        hb = candidate.last_heartbeat_at
+        if hb is not None:
+            if hb.tzinfo is None:
+                hb = hb.replace(tzinfo=timezone.utc)
+            if (datetime.now(timezone.utc) - hb).total_seconds() > stale_secs:
+                rejected_reasons["stale_telemetry"] = (
+                    rejected_reasons.get("stale_telemetry", 0) + 1
+                )
+                continue
+
+        eligible_candidates.append(candidate)
 
     if prefer_non_loopback is None:
         prefer_non_loopback = os.environ.get(

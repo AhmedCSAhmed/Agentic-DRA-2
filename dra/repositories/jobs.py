@@ -180,6 +180,35 @@ class JobsRepository:
         finally:
             session.close()
 
+    def update_job_status_if_running(self, job_id: int) -> bool:
+        """Atomically set status='STOPPED' only when current status='RUNNING'.
+
+        Returns True if the row was updated (prevents double capacity-release when
+        StopContainer RPC and the container watcher race each other).
+        """
+        if job_id <= 0:
+            raise InvalidJobDataError("job_id must be a positive integer")
+
+        session = self._db.start_session()
+        try:
+            rows_updated = (
+                session.query(JobModelORM)
+                .filter(JobModelORM.id == job_id, JobModelORM.status == "RUNNING")
+                .update(
+                    {"status": "STOPPED", "updated_at": self._now()},
+                    synchronize_session=False,
+                )
+            )
+            session.commit()
+            return rows_updated > 0
+        except SQLAlchemyError as exc:
+            session.rollback()
+            raise JobsRepositoryDatabaseError(
+                f"Failed to conditionally stop job '{job_id}'"
+            ) from exc
+        finally:
+            session.close()
+
     def delete_job(self, job_id: int) -> None:
         if job_id <= 0:
             raise InvalidJobDataError("job_id must be a positive integer")

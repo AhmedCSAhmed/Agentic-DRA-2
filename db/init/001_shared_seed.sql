@@ -25,7 +25,9 @@ CREATE TABLE IF NOT EXISTS machines (
     machine_created_at TIMESTAMPTZ NOT NULL,
     machine_updated_at TIMESTAMPTZ NOT NULL,
     dra_grpc_target VARCHAR,
-    available_gb DOUBLE PRECISION
+    available_gb DOUBLE PRECISION,
+    available_cores DOUBLE PRECISION,
+    last_heartbeat_at TIMESTAMPTZ
 );
 
 -- Optional example row (safe to delete)
@@ -36,7 +38,9 @@ INSERT INTO machines (
     machine_created_at,
     machine_updated_at,
     dra_grpc_target,
-    available_gb
+    available_gb,
+    available_cores,
+    last_heartbeat_at
 )
 VALUES (
     'local-1',
@@ -45,6 +49,8 @@ VALUES (
     NOW(),
     NOW(),
     '127.0.0.1:50051',
-    16.0
+    16.0,
+    NULL,
+    NULL
 )
 ON CONFLICT (machine_id) DO NOTHING;

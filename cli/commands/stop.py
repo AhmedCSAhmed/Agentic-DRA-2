@@ -49,6 +49,7 @@ def stop(container_id: str = typer.Argument(..., help="Docker container id to st
 
         resolved_machine_id: str | None = None
         reserved_gb: float = 0.0
+        reserved_cores: float = 0.0
         if isinstance(rr_obj, dict):
             raw_mid = rr_obj.get("machine_id")
             if isinstance(raw_mid, str) and raw_mid.strip():
@@ -61,6 +62,9 @@ def stop(container_id: str = typer.Argument(..., help="Docker container id to st
                     reserved_gb = float(raw_mem.strip())
                 except ValueError:
                     reserved_gb = 0.0
+            raw_cores = rr_obj.get("cpu_cores")
+            if isinstance(raw_cores, (int, float)):
+                reserved_cores = float(raw_cores)
 
         if not resolved_machine_id:
             console.print(
@@ -116,8 +120,9 @@ def stop(container_id: str = typer.Argument(..., help="Docker container id to st
             raise typer.Exit(1)
 
         # Update DB bookkeeping regardless of what the remote gRPC server does.
+        # Use idempotent update so a concurrent watcher thread doesn't double-release.
         try:
-            jobs.update_job_status(job.id, "STOPPED")
+            jobs.update_job_status_if_running(job.id)
         except Exception:
             pass
         if reserved_gb > 0:
@@ -125,15 +130,21 @@ def stop(container_id: str = typer.Argument(..., help="Docker container id to st
                 machines.increment_machine_availability(resolved_machine_id, delta_gb=reserved_gb)
             except Exception:
                 pass
+        if reserved_cores > 0:
+            try:
+                machines.increment_machine_cores(resolved_machine_id, delta_cores=reserved_cores)
+            except Exception:
+                pass
 
         released = float(result.get("memory_gb_released") or 0.0)
         if released <= 0.0 and reserved_gb > 0:
             released = reserved_gb
+        cores_line = f"\n- Cores released: {reserved_cores:.1f}" if reserved_cores > 0 else ""
         console.print(
             Panel(
                 f"[bold green]✓  Stopped[/bold green]  [white]{cid}[/white]\n\n"
                 f"[grey69]- Machine: {resolved_machine_id} → {grpc_target}\n"
-                f"- Memory released: {released:.2f} GB\n"
+                f"- Memory released: {released:.2f} GB{cores_line}\n"
                 f"- {result.get('message','')}[/grey69]",
                 border_style="purple",
                 padding=(1, 2),

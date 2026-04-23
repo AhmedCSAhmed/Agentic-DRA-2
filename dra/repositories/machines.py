@@ -277,6 +277,80 @@ class MachineRepository:
         finally:
             session.close()
 
+    def increment_machine_cores(
+        self,
+        machine_id: str,
+        *,
+        delta_cores: int | float,
+        floor_at_zero: bool = True,
+    ) -> MachineModelORM:
+        """Atomically adjust ``machines.available_cores`` by ``delta_cores``."""
+
+        self._validate_machine_id(machine_id)
+        if isinstance(delta_cores, bool) or not isinstance(delta_cores, (int, float)):
+            raise InvalidMachineDataError("delta_cores must be numeric")
+        if not isfinite(float(delta_cores)):
+            raise InvalidMachineDataError("delta_cores must be finite")
+
+        session = self._db.start_session()
+        session.expire_on_commit = False
+        try:
+            machine = (
+                session.query(MachineModelORM)
+                .filter(MachineModelORM.machine_id == machine_id)
+                .with_for_update()
+                .first()
+            )
+            if machine is None:
+                raise MachineNotFoundError(
+                    f"Machine with machine_id '{machine_id}' was not found"
+                )
+
+            current = float(getattr(machine, "available_cores", 0.0) or 0.0)
+            new_val = current + float(delta_cores)
+            if floor_at_zero and new_val < 0:
+                new_val = 0.0
+
+            setattr(machine, "available_cores", float(new_val))
+            setattr(machine, "machine_updated_at", self._now())
+            session.commit()
+            return machine
+        except SQLAlchemyError as exc:
+            session.rollback()
+            raise MachineRepositoryDatabaseError(
+                f"Failed to increment cores for machine '{machine_id}'"
+            ) from exc
+        finally:
+            session.close()
+
+    def record_heartbeat(self, machine_id: str) -> None:
+        """Update last_heartbeat_at timestamp for a machine."""
+
+        self._validate_machine_id(machine_id)
+        now = self._now()
+        session = self._db.start_session()
+        try:
+            rows_updated = (
+                session.query(MachineModelORM)
+                .filter(MachineModelORM.machine_id == machine_id)
+                .update(
+                    {"last_heartbeat_at": now, "machine_updated_at": now},
+                    synchronize_session=False,
+                )
+            )
+            session.commit()
+            if rows_updated == 0:
+                raise MachineNotFoundError(
+                    f"Machine with machine_id '{machine_id}' was not found"
+                )
+        except SQLAlchemyError as exc:
+            session.rollback()
+            raise MachineRepositoryDatabaseError(
+                f"Failed to record heartbeat for machine '{machine_id}'"
+            ) from exc
+        finally:
+            session.close()
+
     def delete_machine(self, machine_id: str) -> None:
         self._validate_machine_id(machine_id)
 

@@ -42,6 +42,7 @@ class DRAGrpcClient:
         command: Sequence[str] | None = None,
         restart_policy: str | None = None,
         memory_gb: float | None = None,
+        cpu_cores: float | None = None,
         grpc_target: str | None = None,
         timeout: float | None = DEFAULT_RPC_TIMEOUT_S,
     ) -> dict[str, Any]:
@@ -62,6 +63,8 @@ class DRAGrpcClient:
             request.restart_policy = rp
         if memory_gb is not None:
             request.memory_gb = float(memory_gb)
+        if cpu_cores is not None:
+            request.cpu_cores = float(cpu_cores)
         override = (grpc_target or "").strip()
         if override:
             channel = grpc.insecure_channel(override)
@@ -70,9 +73,7 @@ class DRAGrpcClient:
                 return self._pull_and_run_with_stub(stub, request, timeout, connected_to=override)
             finally:
                 channel.close()
-        return self._pull_and_run_with_stub(
-            self._stub, request, timeout, connected_to=self._target
-        )
+        return self._pull_and_run_with_stub(self._stub, request, timeout, connected_to=self._target)
 
     def stop_container(
         self,

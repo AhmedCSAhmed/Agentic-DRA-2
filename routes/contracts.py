@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 from enum import Enum
 from typing import Any, Literal
 
@@ -66,7 +67,9 @@ class MachineCandidate(BaseModel):
     machine_type: str
     grpc_target: str
     available_gb: float
-    
+    available_cores: float = 8.0
+    last_heartbeat_at: datetime | None = None
+
 class SchedulerDecision(BaseModel):
     selected: MachineCandidate | None
     scanned: int

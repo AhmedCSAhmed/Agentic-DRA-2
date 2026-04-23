@@ -15,7 +15,9 @@ create table if not exists public.machines (
     machine_created_at timestamp without time zone not null,
     machine_updated_at timestamp without time zone not null,
     dra_grpc_target text,
-    available_gb double precision
+    available_gb double precision,
+    available_cores double precision,
+    last_heartbeat_at timestamp without time zone
 );
 
 insert into public.machines (
@@ -25,7 +27,9 @@ insert into public.machines (
     machine_created_at,
     machine_updated_at,
     dra_grpc_target,
-    available_gb
+    available_gb,
+    available_cores,
+    last_heartbeat_at
 )
 values (
     'salah-macbook-pro',
@@ -34,7 +38,9 @@ values (
     '2026-04-09 23:39:48.868694',
     '2026-04-09 23:39:48.868694',
     null,
-    16.0
+    16.0,
+    null,
+    null
 )
 on conflict (machine_id) do update
 set
@@ -43,4 +49,6 @@ set
     machine_created_at = excluded.machine_created_at,
     machine_updated_at = excluded.machine_updated_at,
     dra_grpc_target = excluded.dra_grpc_target,
-    available_gb = excluded.available_gb;
+    available_gb = excluded.available_gb,
+    available_cores = excluded.available_cores,
+    last_heartbeat_at = excluded.last_heartbeat_at;

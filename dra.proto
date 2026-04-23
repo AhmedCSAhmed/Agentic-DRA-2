@@ -25,6 +25,8 @@ message PullAndRunRequest {
   // Scheduler reservation: minimum memory (GB) to reserve for this deployment on the chosen machine.
   // The server uses this to decrement machines.available_gb and to persist job metadata.
   float memory_gb = 4;
+  // Scheduler reservation: CPU cores to reserve. Decrements machines.available_cores on the chosen machine.
+  float cpu_cores = 5;
 }
 
 message PullAndRunResponse {

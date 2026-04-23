@@ -17,6 +17,11 @@ def deploy(
         "--memory-gb",
         help="Minimum free memory (GB) required on the chosen machine (scheduler constraint).",
     ),
+    cpu_cores: Optional[float] = typer.Option(
+        None,
+        "--cpu-cores",
+        help="Minimum free CPU cores required on the chosen machine (scheduler constraint).",
+    ),
     machine_type: Optional[str] = typer.Option(
         None,
         "--machine-type",
@@ -48,6 +53,7 @@ def deploy(
                 _deploy_via_scheduler(
                     image,
                     memory_gb=memory_gb,
+                    cpu_cores=cpu_cores,
                     machine_type=machine_type,
                     command=command,
                     restart_policy=restart_policy,
@@ -88,6 +94,7 @@ async def _deploy_via_scheduler(
     image: str,
     *,
     memory_gb: float,
+    cpu_cores: float | None,
     machine_type: str | None,
     command: str | None,
     restart_policy: str | None,
@@ -97,7 +104,7 @@ async def _deploy_via_scheduler(
 
     decision, rpc_result = await execute_scheduled_deploy(
         image_name=image,
-        resource_requirements=ResourceRequirements(memory_gb=memory_gb),
+        resource_requirements=ResourceRequirements(memory_gb=memory_gb, cpu_cores=cpu_cores),
         machine_type=machine_type,
         command=command,
         restart_policy=restart_policy,
@@ -111,7 +118,7 @@ async def _deploy_via_scheduler(
                 "No machine satisfied the request.\n"
                 f"- Scanned: {decision.scanned}, eligible: {decision.eligible}\n"
                 f"- Reject counts: {reasons}\n"
-                "Lower --memory-gb or fix machine ``available_gb`` / ``dra_grpc_target`` in Postgres."
+                "Lower --memory-gb / --cpu-cores or fix machine resources in Postgres."
             ),
         )
 
@@ -148,6 +155,7 @@ async def _deploy_via_scheduler(
     msg = rpc_result.get("message", "")
     cpu = rpc_result.get("cpu_used", 0.0)
     mem = rpc_result.get("memory_gb_used", 0.0)
+    cores_reserved = cpu_cores
     attempts = rpc_result.get("attempts") or []
     failover_note = ""
     if len(attempts) > 1:
@@ -160,12 +168,14 @@ async def _deploy_via_scheduler(
                 f"{attempt.get('machine_id')} → {attempt.get('grpc_target')} [{status}{suffix}]"
             )
         failover_note = "\n- Attempts: " + "; ".join(steps)
+    cores_line = f"\n- CPU cores reserved: {cores_reserved}" if cores_reserved else ""
     return (
         True,
         (
             f"- Machine: {sel.machine_id} ({sel.machine_type}) → {sel.grpc_target}\n"
             f"- Container ID: {cid}\n"
             f"- Workload: {state}\n"
+            f"- Memory reserved: {memory_gb:.1f} GB{cores_line}\n"
             f"- CPU / memory used (reported): {cpu:.1f}% , {mem:.2f} GB\n"
             f"- {msg}"
             f"{failover_note}"
@@ -177,6 +187,7 @@ def deploy_via_scheduler_sync(
     image: str,
     *,
     memory_gb: float = 2.0,
+    cpu_cores: float | None = None,
     machine_type: str | None = None,
     command: str | None = None,
     restart_policy: str | None = None,
@@ -187,6 +198,7 @@ def deploy_via_scheduler_sync(
         _deploy_via_scheduler(
             image,
             memory_gb=memory_gb,
+            cpu_cores=cpu_cores,
             machine_type=machine_type,
             command=command,
             restart_policy=restart_policy,
@@ -194,14 +206,17 @@ def deploy_via_scheduler_sync(
     )
 
 
-def parse_deploy_repl_arg(arg: str) -> tuple[str, float, str | None, str | None, str | None]:
-    """``deploy <image>`` or ``deploy <image> --memory-gb 4``-style extra flags (admin REPL)."""
+def parse_deploy_repl_arg(
+    arg: str,
+) -> tuple[str, float, float | None, str | None, str | None, str | None]:
+    """``deploy <image>`` or ``deploy <image> --memory-gb 4 --cpu-cores 2``-style flags (admin REPL)."""
 
     parts = shlex.split(arg)
     if not parts:
-        return "", 2.0, None, None, None
+        return "", 2.0, None, None, None, None
     image = parts[0]
     memory_gb = 2.0
+    cpu_cores: float | None = None
     machine_type: str | None = None
     command: str | None = None
     restart_policy: str | None = None
@@ -209,7 +224,6 @@ def parse_deploy_repl_arg(arg: str) -> tuple[str, float, str | None, str | None,
     while i < len(parts):
         token = parts[i]
 
-        # Accept common aliases and `--flag=value` style.
         if token.startswith("--memory-gb=") or token.startswith("--memory="):
             _, value = token.split("=", 1)
             memory_gb = float(value)
@@ -217,19 +231,26 @@ def parse_deploy_repl_arg(arg: str) -> tuple[str, float, str | None, str | None,
             continue
 
         if token in ("--memory-gb", "--memory"):
-            # If the user typed `--memory-gb` without a value, prompt interactively
-            # (this parser is used only by the REPL).
             next_is_value = i + 1 < len(parts) and not parts[i + 1].startswith("--")
             if next_is_value:
                 memory_gb = float(parts[i + 1])
                 i += 2
                 continue
-
             from cli.display import console
-
             entered = console.input("  Minimum free memory (GB) [default 2]: ").strip()
             memory_gb = float(entered) if entered else 2.0
             i += 1
+            continue
+
+        if token.startswith("--cpu-cores="):
+            _, value = token.split("=", 1)
+            cpu_cores = float(value)
+            i += 1
+            continue
+
+        if token == "--cpu-cores" and i + 1 < len(parts):
+            cpu_cores = float(parts[i + 1])
+            i += 2
             continue
 
         if token == "--machine-type" and i + 1 < len(parts):
@@ -245,4 +266,4 @@ def parse_deploy_repl_arg(arg: str) -> tuple[str, float, str | None, str | None,
             i += 2
             continue
         i += 1
-    return image, memory_gb, machine_type, command, restart_policy
+    return image, memory_gb, cpu_cores, machine_type, command, restart_policy

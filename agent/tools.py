@@ -95,6 +95,7 @@ def build_dra_tools(client: DRAGrpcClient, machine_repo: MachineRepository) -> l
         command: str | None = None,
         restart_policy: str | None = None,
         memory_gb: float | None = None,
+        cpu_cores: float | None = None,
     ) -> str:
         """Implements RPC PullAndRunImage (request field image_name).
 
@@ -104,6 +105,7 @@ def build_dra_tools(client: DRAGrpcClient, machine_repo: MachineRepository) -> l
             grpc_target: Optional ``host:port`` when not using machine_id.
             command: Optional ``docker run`` args after the image (shell-style), e.g. ``sleep infinity``.
             restart_policy: Docker restart policy: ``no``, ``on-failure``, ``always``, ``unless-stopped``.
+            cpu_cores: CPU cores to reserve on the target machine.
         """
         resolved: str | None = None
         source: str | None = None
@@ -147,6 +149,8 @@ def build_dra_tools(client: DRAGrpcClient, machine_repo: MachineRepository) -> l
             kwargs["restart_policy"] = rp
         if memory_gb is not None:
             kwargs["memory_gb"] = float(memory_gb)
+        if cpu_cores is not None:
+            kwargs["cpu_cores"] = float(cpu_cores)
 
         payload = client.pull_and_run_image(image_name, **kwargs)
         if source:
@@ -168,6 +172,7 @@ async def invoke_pull_and_run_image_via_tool(
     command: str | None = None,
     restart_policy: str | None = None,
     memory_gb: float | None = None,
+    cpu_cores: float | None = None,
 ) -> dict[str, Any]:
     tools = build_dra_tools(client, machine_repo)
     rpc_tool = next((tool for tool in tools if tool.name == "pull_and_run_image"), None)
@@ -185,6 +190,8 @@ async def invoke_pull_and_run_image_via_tool(
         payload["restart_policy"] = restart_policy
     if memory_gb is not None:
         payload["memory_gb"] = float(memory_gb)
+    if cpu_cores is not None:
+        payload["cpu_cores"] = float(cpu_cores)
 
     ctx = SimpleNamespace(tool_name=rpc_tool.name)
     raw_result = await rpc_tool.on_invoke_tool(ctx, json.dumps(payload))

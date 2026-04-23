@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import time
 from dataclasses import dataclass
 
 import grpc
@@ -9,6 +10,7 @@ import grpc
 @dataclass(frozen=True)
 class GrpcProbeResult:
     ok: bool
+    latency_ms: float | None = None
     error: str | None = None
 
 
@@ -35,8 +37,10 @@ def probe_grpc_target(target: str | None) -> GrpcProbeResult:
 
     channel = grpc.insecure_channel(t)
     try:
+        t0 = time.monotonic()
         grpc.channel_ready_future(channel).result(timeout=_probe_timeout_s())
-        return GrpcProbeResult(ok=True, error=None)
+        latency_ms = (time.monotonic() - t0) * 1000
+        return GrpcProbeResult(ok=True, latency_ms=round(latency_ms, 1))
     except Exception as exc:
         return GrpcProbeResult(ok=False, error=str(exc))
     finally:
