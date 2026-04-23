@@ -61,47 +61,9 @@ def _run_deploy(arg: str) -> None:
 
 def _run_status() -> None:
     try:
-        from agent.env import load_project_dotenv
-        from dra.database import Database
-        from dra.repositories.machines import MachineRepository
-        from rich import box
-        from rich.table import Table
+        from cli.commands.status import status as status_cmd
 
-        load_project_dotenv()
-        repo = MachineRepository(Database())
-        machines = repo.list_machines()
-
-        if not machines:
-            console.print("\n  [grey69]No machines registered in the cluster.[/grey69]\n")
-            return
-
-        table = Table(
-            box=box.SIMPLE,
-            border_style="purple",
-            header_style="medium_purple1",
-            show_header=True,
-            padding=(0, 2),
-        )
-        table.add_column("Machine", style="white")
-        table.add_column("Type", style="grey69")
-        table.add_column("gRPC Target", style="grey69")
-        table.add_column("Memory", style="grey69")
-        table.add_column("Status", style="bold green")
-
-        for m in machines:
-            raw_mem = getattr(m, "available_gb", None)
-            mem = f"{raw_mem:.0f} GB" if raw_mem is not None else "—"
-            table.add_row(
-                m.machine_name or m.machine_id,
-                m.machine_type or "—",
-                getattr(m, "dra_grpc_target", None) or "—",
-                mem,
-                "● Online",
-            )
-
-        console.print()
-        console.print(table)
-
+        status_cmd()
     except Exception as exc:
         console.print(f"\n  [red]Could not reach cluster:[/red] [grey69]{exc}[/grey69]\n")
 

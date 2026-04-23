@@ -87,7 +87,8 @@ def admin_boot_screen() -> None:
     title = Text(justify="center")
     title.append("A T L A S\n", style="bold bright_magenta")
     title.append("Distributed Resource Allocator\n\n", style="grey69")
-    title.append("Machines online: ", style="white")
+    # Count is "registered machines" (DB rows). We’ll compute “online” below for the table.
+    title.append("Machines registered: ", style="white")
     title.append(str(count), style="bold white")
     title.append("        Status: ", style="white")
     title.append(status, style=status_style)
@@ -105,6 +106,8 @@ def admin_boot_screen() -> None:
     console.print()
 
     if machines:
+        from cli.health import probe_grpc_target
+
         table = Table(
             box=box.SIMPLE,
             border_style="purple",
@@ -120,13 +123,20 @@ def admin_boot_screen() -> None:
 
         for m in machines:
             raw_mem = getattr(m, "available_gb", None)
+            if isinstance(raw_mem, (int, float)) and float(raw_mem) <= 0.0:
+                continue
             mem = f"{raw_mem:.0f} GB" if raw_mem is not None else "—"
+            probe = probe_grpc_target(getattr(m, "dra_grpc_target", None))
+            if probe.ok:
+                status_text = "[bold green]● Online[/bold green]"
+            else:
+                status_text = "[bold red]● Offline[/bold red]"
             table.add_row(
                 m.machine_name or m.machine_id,
                 m.machine_type or "—",
                 getattr(m, "dra_grpc_target", None) or "—",
                 mem,
-                "● Online",
+                status_text,
             )
         console.print(table)
         console.print()
