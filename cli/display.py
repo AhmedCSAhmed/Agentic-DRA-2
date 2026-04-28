@@ -46,6 +46,8 @@ def boot_screen() -> None:
         ("GitHub GHCR ", "deploy ghcr.io/org/app:latest"),
         ("AWS ECR     ", "deploy 123456.dkr.ecr.us-east-1.amazonaws.com/app:prod"),
         ("Memory req  ", "deploy nginx:latest --memory-gb 4"),
+        ("Owner tag   ", "deploy nginx:latest --username ahmed"),
+        ("Owner auth  ", "deploy nginx:latest --username ahmed --password secret123"),
     ]
     for label, cmd in examples:
         console.print(f"    [medium_purple1]{label}[/medium_purple1]  [white]{cmd}[/white]")
@@ -63,6 +65,10 @@ def boot_screen() -> None:
     console.print(
         "    [bold white]status[/bold white]"
         "                [grey69]Show machines[/grey69]"
+    )
+    console.print(
+        "    [bold white]instances[/bold white]"
+        "             [grey69]Show deployments (instances [username] prompts for password)[/grey69]"
     )
     console.print(
         "    [bold white]help[/bold white]"
@@ -153,6 +159,10 @@ def admin_boot_screen() -> None:
     console.print(
         "    [bold white]status[/bold white]"
         "             [grey69]Show cluster status[/grey69]"
+    )
+    console.print(
+        "    [bold white]instances[/bold white]"
+        "          [grey69]Show deployments (instances [username] prompts for password)[/grey69]"
     )
     console.print(
         "    [bold white]help[/bold white]"

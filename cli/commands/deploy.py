@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import getpass
 import shlex
 from typing import Optional
 
@@ -37,6 +38,18 @@ def deploy(
         "--restart-policy",
         help="Docker restart policy, e.g. ``unless-stopped``.",
     ),
+    username: Optional[str] = typer.Option(
+        None,
+        "--username",
+        "-u",
+        help="Owner username for this deployment (defaults to your local OS user).",
+    ),
+    password: Optional[str] = typer.Option(
+        None,
+        "--password",
+        help="Owner password to create/update username credentials.",
+        hide_input=True,
+    ),
 ) -> None:
     """Deploy a Docker image using the same Postgres-backed scheduler as the HTTP API."""
 
@@ -57,6 +70,8 @@ def deploy(
                     machine_type=machine_type,
                     command=command,
                     restart_policy=restart_policy,
+                    username=username,
+                    password=password,
                 )
             )
 
@@ -98,9 +113,18 @@ async def _deploy_via_scheduler(
     machine_type: str | None,
     command: str | None,
     restart_policy: str | None,
+    username: str | None,
+    password: str | None,
 ) -> tuple[bool, str]:
     from routes.contracts import ResourceRequirements
     from scheduled_deploy import execute_scheduled_deploy
+
+    resolved_username = (username or "").strip() or None
+    if resolved_username is None:
+        try:
+            resolved_username = getpass.getuser().strip() or None
+        except Exception:
+            resolved_username = None
 
     decision, rpc_result = await execute_scheduled_deploy(
         image_name=image,
@@ -108,6 +132,8 @@ async def _deploy_via_scheduler(
         machine_type=machine_type,
         command=command,
         restart_policy=restart_policy,
+        username=resolved_username,
+        password=password,
     )
 
     if decision.selected is None:
@@ -173,6 +199,7 @@ async def _deploy_via_scheduler(
         True,
         (
             f"- Machine: {sel.machine_id} ({sel.machine_type}) → {sel.grpc_target}\n"
+            f"- Owner: {resolved_username or '—'}\n"
             f"- Container ID: {cid}\n"
             f"- Workload: {state}\n"
             f"- Memory reserved: {memory_gb:.1f} GB{cores_line}\n"
@@ -191,6 +218,8 @@ def deploy_via_scheduler_sync(
     machine_type: str | None = None,
     command: str | None = None,
     restart_policy: str | None = None,
+    username: str | None = None,
+    password: str | None = None,
 ) -> tuple[bool, str]:
     """Used by the interactive REPL; returns ``(ok, message)``."""
 
@@ -202,24 +231,37 @@ def deploy_via_scheduler_sync(
             machine_type=machine_type,
             command=command,
             restart_policy=restart_policy,
+            username=username,
+            password=password,
         )
     )
 
 
 def parse_deploy_repl_arg(
     arg: str,
-) -> tuple[str, float, float | None, str | None, str | None, str | None]:
-    """``deploy <image>`` or ``deploy <image> --memory-gb 4 --cpu-cores 2``-style flags (admin REPL)."""
+) -> tuple[
+    str,
+    float,
+    float | None,
+    str | None,
+    str | None,
+    str | None,
+    str | None,
+    str | None,
+]:
+    """``deploy <image>`` flags including ``--username`` and optional ``--password``."""
 
     parts = shlex.split(arg)
     if not parts:
-        return "", 2.0, None, None, None, None
+        return "", 2.0, None, None, None, None, None, None
     image = parts[0]
     memory_gb = 2.0
     cpu_cores: float | None = None
     machine_type: str | None = None
     command: str | None = None
     restart_policy: str | None = None
+    username: str | None = None
+    password: str | None = None
     i = 1
     while i < len(parts):
         token = parts[i]
@@ -265,5 +307,15 @@ def parse_deploy_repl_arg(
             restart_policy = parts[i + 1]
             i += 2
             continue
+
+        if token in ("--username", "-u") and i + 1 < len(parts):
+            username = parts[i + 1]
+            i += 2
+            continue
+
+        if token == "--password" and i + 1 < len(parts):
+            password = parts[i + 1]
+            i += 2
+            continue
         i += 1
-    return image, memory_gb, cpu_cores, machine_type, command, restart_policy
+    return image, memory_gb, cpu_cores, machine_type, command, restart_policy, username, password

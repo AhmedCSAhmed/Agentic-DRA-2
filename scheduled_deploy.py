@@ -14,6 +14,7 @@ from agent.tools import invoke_pull_and_run_image_via_tool
 from dra.database import Database
 from dra.repositories.jobs import JobsRepository
 from dra.repositories.machines import MachineRepository
+from dra.repositories.users import UsersRepository, UsersRepositoryError
 
 from routes.contracts import MachineCandidate, ResourceRequirements, SchedulerDecision
 from routes.scheduler import rank_eligible_machines, select_best_machine
@@ -73,6 +74,8 @@ async def execute_scheduled_deploy(
     machine_type: str | None = None,
     command: str | None = None,
     restart_policy: str | None = None,
+    username: str | None = None,
+    password: str | None = None,
 ) -> tuple[SchedulerDecision, dict[str, Any] | None]:
     """Run the scheduler; if a machine is chosen, call ``pull_and_run_image`` on that host.
 
@@ -96,6 +99,7 @@ async def execute_scheduled_deploy(
     )
 
     client = DRAGrpcClient()
+    resolved_user_id = _resolve_deployment_user_id(username=username, password=password)
     try:
         attempts: list[dict[str, Any]] = []
         for index, candidate in enumerate(ordered_candidates):
@@ -148,12 +152,16 @@ async def execute_scheduled_deploy(
                 try:
                     JobsRepository(Database()).create_job(
                         image_id=str(final_result.get("container_id")),
+                        username=username,
+                        user_id=resolved_user_id,
                         image_name=image_name,
                         status="RUNNING",
                         resource_requirements={
                             "memory_gb": float(resource_requirements.memory_gb),
                             "cpu_cores": float(resource_requirements.cpu_cores or 0.0),
                             "machine_id": candidate.machine_id,
+                            "username": username,
+                            "user_id": resolved_user_id,
                         },
                     )
                 except Exception:
@@ -204,3 +212,25 @@ def _attempt_record(
     record["status"] = "failed"
     record["message"] = rpc_result.get("message")
     return record
+
+
+def _resolve_deployment_user_id(*, username: str | None, password: str | None) -> int | None:
+    normalized_username = (username or "").strip()
+    if not normalized_username:
+        return None
+
+    users_repo = UsersRepository(Database())
+    if password is not None and password.strip():
+        try:
+            user = users_repo.create_or_update_user(
+                username=normalized_username,
+                password=password,
+            )
+            return int(user.id)
+        except UsersRepositoryError:
+            return None
+
+    existing = users_repo.find_user_by_username(normalized_username)
+    if existing is None:
+        return None
+    return int(existing.id)

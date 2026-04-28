@@ -35,12 +35,17 @@ class JobsRepository:
         self,
         *,
         image_id: str,
+        username: str | None = None,
+        user_id: int | None = None,
         resource_requirements: Any,
         image_name: str,
         status: str,
     ) -> JobModelORM:
+        normalized_username = self._normalize_optional_username(username)
         self._validate_create_payload(
             image_id=image_id,
+            username=normalized_username,
+            user_id=user_id,
             resource_requirements=resource_requirements,
             image_name=image_name,
             status=status,
@@ -49,6 +54,8 @@ class JobsRepository:
         now = self._now()
         new_job = JobModelORM(
             image_id=image_id,
+            username=normalized_username,
+            user_id=user_id,
             resource_requirements=resource_requirements,
             image_name=image_name,
             status=status,
@@ -155,6 +162,20 @@ class JobsRepository:
         finally:
             session.close()
 
+    def list_running_jobs(self, *, username: str | None = None) -> list[JobModelORM]:
+        normalized_username = self._normalize_optional_username(username)
+
+        session = self._db.start_session()
+        try:
+            query = session.query(JobModelORM).filter(JobModelORM.status == "RUNNING")
+            if normalized_username is not None:
+                query = query.filter(JobModelORM.username == normalized_username)
+            return query.order_by(JobModelORM.created_at.desc()).all()
+        except SQLAlchemyError as exc:
+            raise JobsRepositoryDatabaseError("Failed to list running jobs") from exc
+        finally:
+            session.close()
+
     def update_job_status(self, job_id: int, new_status: str) -> JobModelORM:
         if job_id <= 0:
             raise InvalidJobDataError("job_id must be a positive integer")
@@ -233,13 +254,30 @@ class JobsRepository:
 
     @staticmethod
     def _validate_create_payload(
-        *, image_id: str, resource_requirements: Any, image_name: str, status: str
+        *,
+        image_id: str,
+        username: str | None,
+        user_id: int | None,
+        resource_requirements: Any,
+        image_name: str,
+        status: str,
     ) -> None:
         if not image_id or not image_id.strip():
             raise InvalidJobDataError("image_id is required")
+        if username is not None and not username.strip():
+            raise InvalidJobDataError("username cannot be blank")
+        if user_id is not None and user_id <= 0:
+            raise InvalidJobDataError("user_id must be a positive integer")
         if resource_requirements is None:
             raise InvalidJobDataError("resource_requirements is required")
         if not image_name or not image_name.strip():
             raise InvalidJobDataError("image_name is required")
         if not status or not status.strip():
             raise InvalidJobDataError("status is required")
+
+    @staticmethod
+    def _normalize_optional_username(username: str | None) -> str | None:
+        if username is None:
+            return None
+        normalized = username.strip()
+        return normalized if normalized else None

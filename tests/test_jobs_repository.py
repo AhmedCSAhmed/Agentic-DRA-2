@@ -25,6 +25,7 @@ class JobsRepositoryTests(unittest.TestCase):
     def test_create_job_sets_timestamps_and_persists(self) -> None:
         result = self.repository.create_job(
             image_id="img-1",
+            username="ahmed",
             resource_requirements={"cpu": 2, "memory": "4Gi"},
             image_name="my-image:v1",
             status="pending",
@@ -32,6 +33,7 @@ class JobsRepositoryTests(unittest.TestCase):
 
         self.assertIsInstance(result, JobModelORM)
         self.assertEqual(result.image_id, "img-1")
+        self.assertEqual(result.username, "ahmed")
         self.assertEqual(result.image_name, "my-image:v1")
         self.assertEqual(result.status, "pending")
         self.assertIsNotNone(result.created_at)
@@ -114,6 +116,33 @@ class JobsRepositoryTests(unittest.TestCase):
                 image_name="service:v3",
                 status="pending",
             )
+
+    def test_list_running_jobs_filters_by_username(self) -> None:
+        running_job = JobModelORM(
+            id=31,
+            image_id="cid-31",
+            username="alice",
+            resource_requirements={"cpu": 1},
+            image_name="svc:v1",
+            status="RUNNING",
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
+        )
+
+        first_filter = MagicMock()
+        second_filter = MagicMock()
+        ordered = MagicMock()
+
+        self.session.query.return_value.filter.return_value = first_filter
+        first_filter.filter.return_value = second_filter
+        second_filter.order_by.return_value = ordered
+        ordered.all.return_value = [running_job]
+
+        result = self.repository.list_running_jobs(username="alice")
+
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0].image_id, "cid-31")
+        self.assertEqual(result[0].username, "alice")
 
 
 if __name__ == "__main__":

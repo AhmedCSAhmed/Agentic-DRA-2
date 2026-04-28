@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import shlex
+
 from rich.panel import Panel
 
 from cli.commands.deploy import deploy_via_scheduler_sync, parse_deploy_repl_arg
@@ -8,11 +10,11 @@ from cli.display import admin_boot_screen, boot_screen, console
 
 
 def _run_deploy(arg: str) -> None:
-    image, memory_gb, cpu_cores, machine_type, command, restart_policy = parse_deploy_repl_arg(arg)
+    image, memory_gb, cpu_cores, machine_type, command, restart_policy, username, password = parse_deploy_repl_arg(arg)
     if not image:
         console.print(
             "\n  [red]Usage:[/red] deploy [italic]<image>[/italic] "
-            "[grey69][--memory-gb N] [--cpu-cores N] [--machine-type T] [--command \"...\"] [--restart-policy unless-stopped][/grey69]\n"
+            "[grey69][--memory-gb N] [--cpu-cores N] [--machine-type T] [--command \"...\"] [--restart-policy unless-stopped] [--username NAME] [--password SECRET][/grey69]\n"
         )
         return
 
@@ -30,6 +32,8 @@ def _run_deploy(arg: str) -> None:
                 machine_type=machine_type,
                 command=command,
                 restart_policy=restart_policy,
+                username=username,
+                password=password,
             )
 
         if ok:
@@ -74,11 +78,12 @@ def _show_help(admin: bool = False) -> None:
     console.print("  [grey69]Available commands:[/grey69]")
     console.print(
         "    [bold white]deploy [italic]<image>[/italic][/bold white]   "
-        "[grey69][--memory-gb N] [--cpu-cores N] [--machine-type T] [--command \"...\"] [--restart-policy unless-stopped][/grey69]"
+        "[grey69][--memory-gb N] [--cpu-cores N] [--machine-type T] [--command \"...\"] [--restart-policy unless-stopped] [--username NAME] [--password SECRET][/grey69]"
     )
     console.print("    [bold white]stop [italic]<container_id>[/italic][/bold white]    Stop a deployment and release reserved memory and cores")
     console.print("    [bold white]off [italic]<container_id>[/italic][/bold white]     Alias for stop")
     console.print("    [bold white]status[/bold white]          Show machines")
+    console.print("    [bold white]instances [italic][username][/italic][/bold white]  Show deployments (password required when username is set)")
     console.print("    [bold white]help[/bold white]             Show this message")
     console.print("    [bold white]q[/bold white]                Quit")
     console.print()
@@ -117,7 +122,7 @@ def run_repl(admin: bool = False) -> None:
             if not arg:
                 console.print(
                     "\n  [red]Usage:[/red] deploy [italic]<image>[/italic] "
-                    "[grey69][--memory-gb N] [--machine-type T] ...[/grey69]\n"
+                    "[grey69][--memory-gb N] [--machine-type T] [--username NAME] [--password SECRET] ...[/grey69]\n"
                 )
             else:
                 _run_deploy(arg)
@@ -130,6 +135,15 @@ def run_repl(admin: bool = False) -> None:
 
         elif cmd == "status":
             _run_status()
+
+        elif cmd == "instances":
+            from cli.commands.instances import instances as instances_cmd
+            parsed_username = arg or None
+            if arg:
+                parts = shlex.split(arg)
+                if len(parts) >= 2 and parts[0] in ("--username", "-u"):
+                    parsed_username = parts[1]
+            instances_cmd(username=parsed_username)
 
         elif cmd in ("help", "?", "--help", "-h"):
             _show_help(admin=admin)

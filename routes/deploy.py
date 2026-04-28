@@ -21,6 +21,8 @@ async def deploy(request: DeployRequest):
         machine_type=request.machine_type,
         command=request.command,
         restart_policy=request.restart_policy,
+        username=request.username,
+        password=request.password,
     )
     if decision.selected is None:
         error = make_no_capacity_error(

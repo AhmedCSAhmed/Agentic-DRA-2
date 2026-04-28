@@ -33,6 +33,7 @@ if str(_PROJECT_ROOT) not in sys.path:
 import typer
 
 from cli.commands.deploy import deploy as atlas_deploy_command
+from cli.commands.instances import instances as atlas_instances_command
 from cli.commands.status import status as atlas_status_command
 from cli.commands.stop import stop as atlas_stop_command
 from cli.display import console
@@ -80,6 +81,7 @@ def main(
 
 
 app.command("deploy")(atlas_deploy_command)
+app.command("instances")(atlas_instances_command)
 app.command("status")(atlas_status_command)
 app.command("stop")(atlas_stop_command)
 

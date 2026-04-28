@@ -26,6 +26,8 @@ class DeployRequest(BaseModel):
     command: str | None = None
     restart_policy: str | None = None
     machine_type: str | None = None
+    username: str | None = None
+    password: str | None = None
     request_id: str | None = None
 
 

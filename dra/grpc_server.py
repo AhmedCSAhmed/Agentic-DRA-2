@@ -9,6 +9,7 @@ import shlex
 import subprocess
 import threading
 import time
+import json
 from typing import Sequence
 
 import grpc
@@ -381,20 +382,7 @@ class DRAServiceServicer(dra_pb2_grpc.DRAServiceServicer):
         poll_interval = float(os.environ.get("DRA_CONTAINER_POLL_INTERVAL_SECONDS", "30"))
         while True:
             time.sleep(poll_interval)
-            try:
-                result = subprocess.run(
-                    ["docker", "inspect", "--format={{.State.Running}}", container_id],
-                    capture_output=True,
-                    text=True,
-                    timeout=self.IMAGE_CHECK_TIMEOUT_SECONDS,
-                )
-                is_running = result.returncode == 0 and result.stdout.strip() == "true"
-            except subprocess.TimeoutExpired:
-                logger.warning("docker inspect timed out for container_id=%s", container_id)
-                continue
-            except Exception:
-                logger.exception("Unexpected error inspecting container_id=%s", container_id)
-                is_running = False
+            is_running = self._container_is_running(container_id)
 
             if not is_running:
                 logger.info(
@@ -410,6 +398,8 @@ class DRAServiceServicer(dra_pb2_grpc.DRAServiceServicer):
         from dra.repositories.machines import MachineRepository, MachineRepositoryError
 
         interval = float(os.environ.get("DRA_HEARTBEAT_INTERVAL_SECONDS", "30"))
+        sync_interval = float(os.environ.get("DRA_STOP_SYNC_INTERVAL_SECONDS", str(interval)))
+        last_sync_at = 0.0
         repo = MachineRepository(Database())
         while True:
             time.sleep(interval)
@@ -419,6 +409,77 @@ class DRAServiceServicer(dra_pb2_grpc.DRAServiceServicer):
                 logger.exception("Heartbeat failed for machine_id=%s", self._machine_id)
             except Exception:
                 logger.exception("Unexpected heartbeat error for machine_id=%s", self._machine_id)
+
+            now = time.monotonic()
+            if now - last_sync_at < sync_interval:
+                continue
+            last_sync_at = now
+            try:
+                self._sync_running_jobs_with_docker()
+            except Exception:
+                logger.exception("Unexpected stop-sync error for machine_id=%s", self._machine_id)
+
+    def _sync_running_jobs_with_docker(self) -> int:
+        from dra.database import Database
+        from dra.repositories.jobs import JobsRepository
+
+        if not self._machine_id:
+            return 0
+
+        repo = JobsRepository(Database())
+        running_jobs = repo.list_running_jobs()
+        synced = 0
+        for job in running_jobs:
+            rr = self._resource_requirements_obj(getattr(job, "resource_requirements", None))
+            machine_id = (rr.get("machine_id") or "").strip() if isinstance(rr.get("machine_id"), str) else ""
+            if machine_id != self._machine_id:
+                continue
+
+            container_id = (getattr(job, "image_id", "") or "").strip()
+            if not container_id:
+                continue
+
+            if self._container_is_running(container_id):
+                continue
+
+            released = self._record_job_stopped_and_release(container_id=container_id)
+            synced += 1
+            logger.info(
+                "Synced stopped container from host state: container_id=%s machine_id=%s released_gb=%.2f",
+                container_id,
+                self._machine_id,
+                float(released),
+            )
+        return synced
+
+    def _container_is_running(self, container_id: str) -> bool:
+        try:
+            result = subprocess.run(
+                ["docker", "inspect", "--format={{.State.Running}}", container_id],
+                capture_output=True,
+                text=True,
+                timeout=self.IMAGE_CHECK_TIMEOUT_SECONDS,
+            )
+            return result.returncode == 0 and result.stdout.strip() == "true"
+        except subprocess.TimeoutExpired:
+            logger.warning("docker inspect timed out for container_id=%s", container_id)
+            return True
+        except Exception:
+            logger.exception("Unexpected error inspecting container_id=%s", container_id)
+            return False
+
+    @staticmethod
+    def _resource_requirements_obj(value: object) -> dict:
+        if isinstance(value, dict):
+            return value
+        if isinstance(value, str) and value.strip():
+            try:
+                parsed = json.loads(value)
+            except json.JSONDecodeError:
+                return {}
+            if isinstance(parsed, dict):
+                return parsed
+        return {}
 
     def get_metrics(self) -> tuple[float, float]:
         """Collects host-level CPU usage percent and used memory in GB."""

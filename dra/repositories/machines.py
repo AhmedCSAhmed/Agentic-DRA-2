@@ -465,14 +465,27 @@ class MachineRepository:
         if not value or not value.strip():
             raise InvalidMachineDataError("dra_grpc_target cannot be empty")
         text = value.strip()
-        if text.count(":") != 1:
-            raise InvalidMachineDataError(
-                "dra_grpc_target must be host:port (e.g. 10.0.0.5:50051)"
-            )
-        host, port_str = text.split(":", 1)
+
+        # Support both IPv4/hostname (host:port) and IPv6 bracket notation ([::1]:port).
+        if text.startswith("["):
+            # IPv6: [addr]:port
+            bracket_end = text.find("]")
+            if bracket_end == -1 or bracket_end + 1 >= len(text) or text[bracket_end + 1] != ":":
+                raise InvalidMachineDataError(
+                    "dra_grpc_target IPv6 must be [addr]:port (e.g. [fd7a::1]:50051)"
+                )
+            host = text[1:bracket_end]
+            port_str = text[bracket_end + 2:]
+        else:
+            if text.count(":") != 1:
+                raise InvalidMachineDataError(
+                    "dra_grpc_target must be host:port (e.g. 10.0.0.5:50051 or [fd7a::1]:50051)"
+                )
+            host, port_str = text.split(":", 1)
+
         if not host or not port_str.isdigit():
             raise InvalidMachineDataError(
-                "dra_grpc_target must be host:port (e.g. 10.0.0.5:50051)"
+                "dra_grpc_target must be host:port (e.g. 10.0.0.5:50051 or [fd7a::1]:50051)"
             )
         port = int(port_str)
         if not 1 <= port <= 65535:
