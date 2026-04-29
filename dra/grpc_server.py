@@ -35,6 +35,7 @@ class DRAServiceServicer(dra_pb2_grpc.DRAServiceServicer):
 
     COMMAND_TIMEOUT_SECONDS = 120
     IMAGE_CHECK_TIMEOUT_SECONDS = 30
+    DOCKER_MIN_MEMORY_BYTES = 6 * 1024 * 1024
     IMAGE_NAME_PATTERN = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._/\-:@]{0,254}$")
     RESTART_POLICY_PATTERN = re.compile(
         r"^(no|on-failure|always|unless-stopped|on-failure:\d+)$"
@@ -108,6 +109,8 @@ class DRAServiceServicer(dra_pb2_grpc.DRAServiceServicer):
                 image_name,
                 command=cmd_args,
                 restart_policy=restart_policy,
+                memory_gb=reserved_gb,
+                cpu_cores=reserved_cores,
             )
             if self._machine_id:
                 threading.Thread(
@@ -115,7 +118,7 @@ class DRAServiceServicer(dra_pb2_grpc.DRAServiceServicer):
                     args=(container_id,),
                     daemon=True,
                 ).start()
-            cpu_used, memory_gb_used = self.get_metrics()
+            cpu_used, memory_gb_used = self.get_container_metrics(container_id)
 
             # Persist a job record for stop/release bookkeeping (best-effort).
             if self._machine_id:
@@ -196,9 +199,7 @@ class DRAServiceServicer(dra_pb2_grpc.DRAServiceServicer):
             context.set_details(self._stderr_or_stdout(exc))
             return dra_pb2.StopContainerResponse(success=False, message=self._stderr_or_stdout(exc), memory_gb_released=0.0)
 
-        released = 0.0
-        if self._machine_id:
-            released = self._record_job_stopped_and_release(container_id=container_id)
+        released = self._record_job_stopped_and_release(container_id=container_id)
 
         return dra_pb2.StopContainerResponse(
             success=True,
@@ -263,22 +264,48 @@ class DRAServiceServicer(dra_pb2_grpc.DRAServiceServicer):
         *,
         command: Sequence[str] | None = None,
         restart_policy: str | None = None,
+        memory_gb: float = 0.0,
+        cpu_cores: float = 0.0,
     ) -> str:
-        """Runs a container in detached mode and returns its container ID."""
+        """Runs a container in detached mode and returns its container ID.
+
+        ``memory_gb`` and ``cpu_cores``, when > 0, are enforced via ``--memory`` /
+        ``--memory-swap`` and ``--cpus`` so the kernel actually caps the container
+        at what was reserved. Without this, the registry's bookkeeping drifts from
+        reality whenever a workload exceeds its request.
+        """
 
         extra = list(command) if command else []
         restart: list[str] = []
         if restart_policy:
             restart = ["--restart", restart_policy]
 
+        limits: list[str] = []
+        if memory_gb and memory_gb > 0:
+            memory_bytes = int(float(memory_gb) * (1024 ** 3))
+            if memory_bytes < self.DOCKER_MIN_MEMORY_BYTES:
+                raise DockerRunError(
+                    f"memory_gb={memory_gb} is below Docker's minimum of "
+                    f"{self.DOCKER_MIN_MEMORY_BYTES} bytes (~6 MB)"
+                )
+            # memory-swap == memory => no swap headroom beyond the cap.
+            limits += [
+                f"--memory={memory_bytes}",
+                f"--memory-swap={memory_bytes}",
+            ]
+        if cpu_cores and cpu_cores > 0:
+            limits += [f"--cpus={float(cpu_cores):g}"]
+
         logger.info(
-            "Starting container for image=%s restart=%s command=%s",
+            "Starting container for image=%s restart=%s command=%s memory_gb=%s cpu_cores=%s",
             image_name,
             restart_policy or "(none)",
             extra or "(image default)",
+            memory_gb,
+            cpu_cores,
         )
         try:
-            run_cmd = ["docker", "run", "-d", *restart, image_name, *extra]
+            run_cmd = ["docker", "run", "-d", *restart, *limits, image_name, *extra]
             result = self._run_command(
                 run_cmd,
                 timeout=self.COMMAND_TIMEOUT_SECONDS,
@@ -299,25 +326,33 @@ class DRAServiceServicer(dra_pb2_grpc.DRAServiceServicer):
         logger.info("Container started: image=%s container_id=%s", image_name, container_id)
         return container_id
 
-    def _apply_capacity_delta(self, *, delta_gb: float) -> None:
-        """Best-effort update of machines.available_gb for this server's machine_id."""
+    def _apply_capacity_delta(self, *, delta_gb: float, machine_id: str | None = None) -> None:
+        """Best-effort update of machines.available_gb.
+
+        Targets ``machine_id`` if provided, else falls back to this server's identity.
+        Falling back is only useful when the server boots with --machine-name; jobs
+        always carry their own ``machine_id`` in ``resource_requirements``, so callers
+        on the release path should pass it explicitly.
+        """
         from dra.database import Database
         from dra.repositories.machines import MachineRepository
 
-        if not self._machine_id:
+        target = (machine_id or self._machine_id or "").strip() or None
+        if not target:
             return
         repo = MachineRepository(Database())
-        repo.increment_machine_availability(self._machine_id, delta_gb=float(delta_gb))
+        repo.increment_machine_availability(target, delta_gb=float(delta_gb))
 
-    def _apply_cores_delta(self, *, delta_cores: float) -> None:
-        """Best-effort update of machines.available_cores for this server's machine_id."""
+    def _apply_cores_delta(self, *, delta_cores: float, machine_id: str | None = None) -> None:
+        """Best-effort update of machines.available_cores. See ``_apply_capacity_delta``."""
         from dra.database import Database
         from dra.repositories.machines import MachineRepository
 
-        if not self._machine_id:
+        target = (machine_id or self._machine_id or "").strip() or None
+        if not target:
             return
         repo = MachineRepository(Database())
-        repo.increment_machine_cores(self._machine_id, delta_cores=float(delta_cores))
+        repo.increment_machine_cores(target, delta_cores=float(delta_cores))
 
     def _record_job_started(
         self, *, container_id: str, image_name: str, reserved_gb: float, reserved_cores: float = 0.0
@@ -356,6 +391,7 @@ class DRAServiceServicer(dra_pb2_grpc.DRAServiceServicer):
 
         reserved = 0.0
         reserved_cores = 0.0
+        target_machine_id: str | None = None
         rr = getattr(job, "resource_requirements", None)
         if isinstance(rr, dict):
             raw = rr.get("memory_gb")
@@ -364,6 +400,9 @@ class DRAServiceServicer(dra_pb2_grpc.DRAServiceServicer):
             raw_cores = rr.get("cpu_cores")
             if isinstance(raw_cores, (int, float)):
                 reserved_cores = float(raw_cores)
+            raw_mid = rr.get("machine_id")
+            if isinstance(raw_mid, str) and raw_mid.strip():
+                target_machine_id = raw_mid.strip()
 
         was_running = False
         try:
@@ -372,9 +411,9 @@ class DRAServiceServicer(dra_pb2_grpc.DRAServiceServicer):
             logger.exception("Failed to conditionally stop job for container_id=%s", container_id)
 
         if was_running and reserved > 0:
-            self._apply_capacity_delta(delta_gb=reserved)
+            self._apply_capacity_delta(delta_gb=reserved, machine_id=target_machine_id)
         if was_running and reserved_cores > 0:
-            self._apply_cores_delta(delta_cores=reserved_cores)
+            self._apply_cores_delta(delta_cores=reserved_cores, machine_id=target_machine_id)
         return reserved if was_running else 0.0
 
     def _watch_container(self, container_id: str) -> None:
@@ -388,8 +427,7 @@ class DRAServiceServicer(dra_pb2_grpc.DRAServiceServicer):
                 logger.info(
                     "Container exited, auto-releasing capacity: container_id=%s", container_id
                 )
-                if self._machine_id:
-                    self._record_job_stopped_and_release(container_id=container_id)
+                self._record_job_stopped_and_release(container_id=container_id)
                 break
 
     def _heartbeat_loop(self) -> None:
@@ -493,6 +531,85 @@ class DRAServiceServicer(dra_pb2_grpc.DRAServiceServicer):
             memory_gb_used,
         )
         return cpu_used, memory_gb_used
+
+    def get_container_metrics(self, container_id: str) -> tuple[float, float]:
+        """Per-container CPU% and memory in GB via ``docker stats --no-stream``.
+
+        Returns ``(0.0, 0.0)`` on any failure — these are reporting metrics, not
+        bookkeeping, so a transient failure shouldn't fail the deploy.
+        """
+
+        try:
+            result = subprocess.run(
+                [
+                    "docker", "stats", "--no-stream",
+                    "--format", "{{.CPUPerc}};{{.MemUsage}}",
+                    container_id,
+                ],
+                capture_output=True,
+                text=True,
+                timeout=self.IMAGE_CHECK_TIMEOUT_SECONDS,
+            )
+        except subprocess.TimeoutExpired:
+            logger.warning("docker stats timed out for container_id=%s", container_id)
+            return 0.0, 0.0
+        except Exception:
+            logger.exception("docker stats failed for container_id=%s", container_id)
+            return 0.0, 0.0
+
+        if result.returncode != 0:
+            logger.warning(
+                "docker stats returned %d for container_id=%s: %s",
+                result.returncode,
+                container_id,
+                (result.stderr or "").strip(),
+            )
+            return 0.0, 0.0
+
+        text = (result.stdout or "").strip()
+        if not text or ";" not in text:
+            return 0.0, 0.0
+        cpu_part, mem_part = text.split(";", 1)
+        cpu = self._parse_percent(cpu_part)
+        mem = self._parse_memory_to_gb(mem_part.split(" / ", 1)[0])
+        logger.info(
+            "Container metrics: container_id=%s cpu=%.2f mem_gb=%.4f",
+            container_id,
+            cpu,
+            mem,
+        )
+        return cpu, mem
+
+    @staticmethod
+    def _parse_percent(value: str) -> float:
+        text = (value or "").strip().rstrip("%").strip()
+        try:
+            return float(text)
+        except ValueError:
+            return 0.0
+
+    @staticmethod
+    def _parse_memory_to_gb(value: str) -> float:
+        text = (value or "").strip()
+        multipliers = {
+            "TiB": 1024 ** 4,
+            "GiB": 1024 ** 3,
+            "MiB": 1024 ** 2,
+            "KiB": 1024,
+            "TB": 1000 ** 4,
+            "GB": 1000 ** 3,
+            "MB": 1000 ** 2,
+            "KB": 1000,
+            "B": 1,
+        }
+        for unit, mult in multipliers.items():
+            if text.endswith(unit):
+                num_text = text[: -len(unit)].strip()
+                try:
+                    return float(num_text) * mult / (1024 ** 3)
+                except ValueError:
+                    return 0.0
+        return 0.0
 
     def _image_exists_locally(self, image_name: str) -> bool:
         """Checks whether the Docker image already exists locally."""

@@ -228,6 +228,42 @@ class MachineRepository:
         finally:
             session.close()
 
+    def update_machine_cores(
+        self,
+        machine_id: str,
+        *,
+        available_cores: int | float,
+    ) -> MachineModelORM:
+        self._validate_machine_id(machine_id)
+        normalized_available_cores = self._normalize_available_cores_value(
+            machine_id, available_cores
+        )
+
+        session = self._db.start_session()
+        session.expire_on_commit = False
+        try:
+            machine = (
+                session.query(MachineModelORM)
+                .filter(MachineModelORM.machine_id == machine_id)
+                .first()
+            )
+            if machine is None:
+                raise MachineNotFoundError(
+                    f"Machine with machine_id '{machine_id}' was not found"
+                )
+
+            setattr(machine, "available_cores", normalized_available_cores)
+            setattr(machine, "machine_updated_at", self._now())
+            session.commit()
+            return machine
+        except SQLAlchemyError as exc:
+            session.rollback()
+            raise MachineRepositoryDatabaseError(
+                f"Failed to update cores for machine '{machine_id}'"
+            ) from exc
+        finally:
+            session.close()
+
     def increment_machine_availability(
         self,
         machine_id: str,
@@ -526,3 +562,25 @@ class MachineRepository:
                 f"available_gb for machine '{machine_id}' must be finite"
             )
         return availability_value
+
+    @staticmethod
+    def _normalize_available_cores_value(
+        machine_id: str,
+        available_cores: int | float,
+    ) -> float:
+        if not machine_id or not machine_id.strip():
+            raise InvalidMachineDataError("machine_id is required for cores update")
+        if isinstance(available_cores, bool) or not isinstance(available_cores, (int, float)):
+            raise InvalidMachineDataError(
+                f"available_cores for machine '{machine_id}' must be numeric"
+            )
+        cores_value = float(available_cores)
+        if cores_value < 0:
+            raise InvalidMachineDataError(
+                f"available_cores for machine '{machine_id}' must be >= 0"
+            )
+        if not isfinite(cores_value):
+            raise InvalidMachineDataError(
+                f"available_cores for machine '{machine_id}' must be finite"
+            )
+        return cores_value

@@ -141,6 +141,173 @@ def _resolve_bind(bind: str | None, machine: MachineModelORM | None) -> str:
     return _default_bind()
 
 
+def _detect_host_cores() -> int | None:
+    raw = (os.environ.get("DRA_HOST_CORES") or "").strip()
+    if raw:
+        try:
+            override = int(raw)
+        except ValueError:
+            logger.warning("Ignoring non-integer DRA_HOST_CORES=%r", raw)
+        else:
+            if override > 0:
+                return override
+            logger.warning("Ignoring non-positive DRA_HOST_CORES=%r", raw)
+    return os.cpu_count()
+
+
+def _detect_host_memory_gb() -> float | None:
+    raw = (os.environ.get("DRA_HOST_MEMORY_GB") or "").strip()
+    if raw:
+        try:
+            override = float(raw)
+        except ValueError:
+            logger.warning("Ignoring non-numeric DRA_HOST_MEMORY_GB=%r", raw)
+        else:
+            if override > 0:
+                return override
+            logger.warning("Ignoring non-positive DRA_HOST_MEMORY_GB=%r", raw)
+    try:
+        import psutil
+    except ImportError:
+        logger.warning("psutil not installed; cannot auto-detect host memory")
+        return None
+    try:
+        return float(psutil.virtual_memory().total) / (1024.0 ** 3)
+    except Exception as exc:
+        logger.warning("psutil.virtual_memory() failed: %s", exc)
+        return None
+
+
+def _sum_reserved_field_on_machine(machine_id: str, field: str) -> float:
+    """Sum a numeric ``resource_requirements`` field across RUNNING jobs on this machine."""
+
+    from dra.database import Database
+    from dra.repositories.jobs import JobsRepository, JobsRepositoryError
+
+    try:
+        running = JobsRepository(Database()).list_running_jobs()
+    except JobsRepositoryError as exc:
+        logger.warning(
+            "Could not enumerate running jobs while seeding %s for machine_id=%r: %s",
+            field,
+            machine_id,
+            exc,
+        )
+        return 0.0
+
+    reserved = 0.0
+    for job in running:
+        rr = getattr(job, "resource_requirements", None)
+        if not isinstance(rr, dict):
+            continue
+        if rr.get("machine_id") != machine_id:
+            continue
+        raw = rr.get(field)
+        if isinstance(raw, (int, float)) and not isinstance(raw, bool):
+            reserved += float(raw)
+    return reserved
+
+
+def _reserved_cores_on_machine(machine_id: str) -> float:
+    return _sum_reserved_field_on_machine(machine_id, "cpu_cores")
+
+
+def _reserved_memory_on_machine(machine_id: str) -> float:
+    return _sum_reserved_field_on_machine(machine_id, "memory_gb")
+
+
+def _seed_machine_cores(machine: MachineModelORM) -> None:
+    """Reconcile ``machines.available_cores`` with the host's CPU count at startup.
+
+    The column starts as NULL on registration and only ever moves via deploy/release
+    deltas, so without this the registry underreports capacity as 0.0. Subtract cores
+    reserved by jobs that are still RUNNING on this machine so a restart doesn't
+    silently free their reservations.
+    """
+
+    total = _detect_host_cores()
+    if total is None:
+        logger.warning(
+            "Could not detect host CPU count for machine_id=%r; leaving available_cores untouched",
+            machine.machine_id,
+        )
+        return
+
+    reserved = _reserved_cores_on_machine(machine.machine_id)
+    available = max(float(total) - reserved, 0.0)
+
+    from dra.database import Database
+    from dra.repositories.machines import (
+        MachineRepository,
+        MachineRepositoryError,
+    )
+
+    repo = MachineRepository(Database())
+    try:
+        repo.update_machine_cores(machine.machine_id, available_cores=available)
+    except MachineRepositoryError as exc:
+        logger.warning(
+            "Failed to seed available_cores=%s for machine_id=%r: %s",
+            available,
+            machine.machine_id,
+            exc,
+        )
+        return
+
+    logger.info(
+        "Seeded available_cores=%s (host_total=%s reserved=%s) for machine_id=%r",
+        available,
+        total,
+        reserved,
+        machine.machine_id,
+    )
+
+
+def _seed_machine_memory(machine: MachineModelORM) -> None:
+    """Reconcile ``machines.available_gb`` with the host's RAM at startup.
+
+    Mirrors ``_seed_machine_cores`` so the registry reflects real memory capacity
+    minus what's reserved by jobs currently RUNNING on this machine.
+    """
+
+    total = _detect_host_memory_gb()
+    if total is None:
+        logger.warning(
+            "Could not detect host memory for machine_id=%r; leaving available_gb untouched",
+            machine.machine_id,
+        )
+        return
+
+    reserved = _reserved_memory_on_machine(machine.machine_id)
+    available = max(float(total) - reserved, 0.0)
+
+    from dra.database import Database
+    from dra.repositories.machines import (
+        MachineRepository,
+        MachineRepositoryError,
+    )
+
+    repo = MachineRepository(Database())
+    try:
+        repo.update_machine_availability(machine.machine_id, available_gb=available)
+    except MachineRepositoryError as exc:
+        logger.warning(
+            "Failed to seed available_gb=%s for machine_id=%r: %s",
+            available,
+            machine.machine_id,
+            exc,
+        )
+        return
+
+    logger.info(
+        "Seeded available_gb=%.2f (host_total=%.2f reserved=%.2f) for machine_id=%r",
+        available,
+        total,
+        reserved,
+        machine.machine_id,
+    )
+
+
 def serve(*, bind: str | None = None, machine_name: str | None = None) -> None:
     """Listen for gRPC until interrupted.
 
@@ -159,6 +326,8 @@ def serve(*, bind: str | None = None, machine_name: str | None = None) -> None:
             machine.machine_type,
             getattr(machine, "dra_grpc_target", None),
         )
+        _seed_machine_cores(machine)
+        _seed_machine_memory(machine)
 
     address = _resolve_bind(bind, machine)
     if machine is not None and not (bind or _env_bind()):
