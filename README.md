@@ -64,6 +64,13 @@ All three entry points share one scheduler and one gRPC deploy path
 
 ## Architecture
 
+<img width="887" height="633" alt="Screenshot 2026-07-08 at 4 27 40 PM" src="https://github.com/user-attachments/assets/ae78a9d7-1205-4edc-924e-c8d76e263942" />
+
+<img width="496" height="804" alt="Screenshot 2026-07-08 at 4 29 03 PM" src="https://github.com/user-attachments/assets/fe2d87d3-b704-474d-a882-b18d0b95e20c" />
+
+
+
+
 ```
               ┌──────────────┐     ┌──────────────┐     ┌──────────────┐
               │  atlas CLI   │     │  HTTP API    │     │    Agent     │
